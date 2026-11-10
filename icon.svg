@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a2a28"/><stop offset="1" stop-color="#121211"/>
+    </linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="none" stroke="#3a3a37" stroke-width="6"/>
+  <!-- bars: with Claude (blue) + solo (orange) -->
+  <rect x="250" y="560" width="96" height="220" rx="16" fill="#3987e5"/>
+  <rect x="400" y="440" width="96" height="340" rx="16" fill="#d95926"/>
+  <rect x="550" y="500" width="96" height="280" rx="16" fill="#3987e5"/>
+  <rect x="700" y="340" width="96" height="440" rx="16" fill="#d95926"/>
+  <!-- commit graph line -->
+  <polyline points="298,430 448,310 598,370 748,220" fill="none" stroke="#f0efec" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <g fill="#1a1a19" stroke="#f0efec" stroke-width="20">
+    <circle cx="298" cy="430" r="34"/><circle cx="448" cy="310" r="34"/>
+    <circle cx="598" cy="370" r="34"/><circle cx="748" cy="220" r="34"/>
+  </g>
+</svg>

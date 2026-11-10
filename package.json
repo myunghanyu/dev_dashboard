@@ -1,0 +1,15 @@
+{
+  "name": "dev-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "check": "node collect.js",
+    "release": "./release.sh"
+  },
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "electron": "^33.0.0"
+  }
+}
