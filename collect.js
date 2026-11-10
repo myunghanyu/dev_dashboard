@@ -297,6 +297,13 @@ async function createTicketBranch(repo, branch, base) {
   await run('git', ['branch', '--no-track', branch, start], p)
   return { base, startSha: (await run('git', ['rev-parse', start], p)).trim() }
 }
+// Opens Terminal.app in the repo running `claude`. Path goes through argv, so no AppleScript escaping needed.
+const shq = s => `'${s.replace(/'/g, `'\\''`)}'`
+async function openClaude(repo) {
+  const cmd = `cd ${shq(await repoPath(repo))} && claude`
+  await run('osascript', ['-e', 'on run argv', '-e', 'tell application "Terminal" to do script (item 1 of argv)',
+    '-e', 'tell application "Terminal" to activate', '-e', 'end run', cmd])
+}
 async function checkoutTicket(repo, branch) { await run('git', ['switch', branch], await repoPath(repo)) }
 async function ticketChanges(repo) {
   const p = await repoPath(repo)
@@ -428,10 +435,11 @@ async function createReleasePR({ repo, base, head, title, body }) {
   return (await run('gh', ['pr', 'create', '-R', slug, '--base', base, '--head', head, '--title', title, '--body', body])).trim()
 }
 
-module.exports = { culprits, ticketCulprits, parseHunks, localUsage, usageView, releaseDraft, createReleasePR, USAGE_FILE, readUsage, TICKET_STATUS, branchName, createTicketBranch, checkoutTicket, ticketChanges, commitTicket, pushTicket, ticketStats, linkTickets, linkSessions, repos, commits, sessions, status, actions, exportLines, summarize }
+module.exports = { openClaude, shq, culprits, ticketCulprits, parseHunks, localUsage, usageView, releaseDraft, createReleasePR, USAGE_FILE, readUsage, TICKET_STATUS, branchName, createTicketBranch, checkoutTicket, ticketChanges, commitTicket, pushTicket, ticketStats, linkTickets, linkSessions, repos, commits, sessions, status, actions, exportLines, summarize }
 
 if (require.main === module) (async () => {
   const assert = require('assert')
+  assert.equal(require('child_process').execFileSync('sh', ['-c', 'printf %s ' + shq("it's a $x `y`")]).toString(), "it's a $x `y`")
   assert.equal(classify('[mbe] submodule update'), 'other')
   assert.equal(classify('fix(api): null deref'), 'fix')
   assert.equal(classify('[ssm] 시험용 ssm.ini 기능 추가'), 'feat')

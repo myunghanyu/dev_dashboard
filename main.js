@@ -46,6 +46,8 @@ ipcMain.handle('ticket', async (_, action, arg = {}) => {
       await c.checkoutTicket(t.repo, t.branch)
       if (t.status === 'todo') t.status = 'doing'
       break
+    case 'claude':
+      return c.openClaude(t.repo)
     case 'changes':
       return c.ticketChanges(t.repo)
     case 'culprits':

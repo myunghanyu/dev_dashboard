@@ -468,6 +468,7 @@ function renderTickets() {
       const b = (act, txt, cls = '') => `<button data-act="${act}" data-id="${esc(t.id)}" class="${cls}">${txt}</button>`
       const acts = st === 'done' ? b('reopen', '다시 열기') : [
         !onBranch && b('start', '작업 시작', st === 'todo' ? 'primary' : ''),
+        onBranch && st === 'doing' && b('claude', 'Claude 열기'),
         onBranch && b('commit', '커밋', st === 'doing' ? 'primary' : ''),
         s.commits > 0 && b('push', '푸시'),
         st !== 'todo' && b('done', '완료', st === 'pushed' ? 'primary' : ''),
@@ -543,6 +544,7 @@ $('#board').onclick = async e => {
       await tcall('commit', { id, message: $('#cdMsg').value })
       await loadStatus()
     }
+    else if (act === 'claude') await tcall('claude', { id })
     else if (act === 'push') { if (confirm(`${t.branch} 를 origin 에 푸시할까요?`)) await tcall('push', { id }) }
     else if (act === 'done') await tcall('status', { id, status: 'done' })
     else if (act === 'reopen') await tcall('status', { id, status: 'doing' })
