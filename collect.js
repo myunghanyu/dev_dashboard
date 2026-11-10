@@ -15,9 +15,11 @@ const run = (cmd, args, cwd) => new Promise((resolve, reject) =>
   execFile(cmd, args, { cwd, maxBuffer: 64 << 20, timeout: 60000 }, (err, out, errOut) =>
     err ? reject(new Error((errOut || err.message).trim())) : resolve(out)))
 
-let reposCache
+let reposCache, reposAt = 0
+// rescan every minute so newly cloned repos show up without restarting the app
 async function repos() {
-  if (reposCache) return reposCache
+  if (reposCache && Date.now() - reposAt < 60e3) return reposCache
+  reposAt = Date.now()
   const found = []
   for (const a of fs.existsSync(DEV) ? fs.readdirSync(DEV, { withFileTypes: true }) : []) {
     if (!a.isDirectory()) continue

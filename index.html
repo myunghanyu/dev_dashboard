@@ -10,7 +10,7 @@
     --surface-0: #121211; --surface-1: #1a1a19; --border: #2e2e2c;
     --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8a897f;
     --series-1: #3987e5; --series-2: #d95926;
-    --cat-FE: #199e70; --cat-BE: #c98500; --cat-Module: #9085e9; --cat-none: #5c5b55;
+    --cat-FE: #199e70; --cat-BE: #c98500; --cat-Module: #9085e9; --cat-Toy: #d9607a; --cat-none: #5c5b55;
     --good: #2e9e5b; --warning: #c98500; --critical: #e66767;
   }
   * { box-sizing: border-box }
@@ -163,8 +163,8 @@
   <section data-tab="report" class="c6"><h2>Export <span class="muted" id="export-path"></span></h2><pre id="export-out" class="scroll muted">상단 Export 버튼을 누르면 선택한 기간의 [레포] - 변경 이력이 여기에 표시되고 클립보드에 복사됩니다.</pre></section>
   <section data-tab="report" class="c6"><h2>AI 요약</h2><pre id="ai-out" class="scroll muted">상단 AI 요약 버튼을 누르면 Claude가 선택한 기간을 기능 단위로 요약합니다.</pre></section>
   <section data-tab="actions" class="c12"><h2>GitHub Actions <span class="muted">(최근 30일 활동 레포 · 레포당 최근 20회 · 60초마다 갱신)</span></h2><div id="actions" class="scroll muted">불러오는 중…</div></section>
-  <section data-tab="cats" class="c12"><h2>레포 분류 <span class="muted">(FE / BE / Module — 모든 화면의 레포 태그에 반영)</span></h2>
-    <div class="catfilter"><span><i class="sw" style="background:var(--cat-FE)"></i>FE</span><span><i class="sw" style="background:var(--cat-BE)"></i>BE</span><span><i class="sw" style="background:var(--cat-Module)"></i>Module</span><span><i class="sw" style="background:var(--cat-none)"></i>미분류</span></div>
+  <section data-tab="cats" class="c12"><h2>레포 분류 <span class="muted">(FE / BE / Module / Toy — 모든 화면의 레포 태그에 반영)</span></h2>
+    <div class="catfilter"><span><i class="sw" style="background:var(--cat-FE)"></i>FE</span><span><i class="sw" style="background:var(--cat-BE)"></i>BE</span><span><i class="sw" style="background:var(--cat-Module)"></i>Module</span><span><i class="sw" style="background:var(--cat-Toy)"></i>Toy</span><span><i class="sw" style="background:var(--cat-none)"></i>미분류</span></div>
     <div id="cats" class="scroll"></div></section>
   <section data-tab="tickets" class="c3"><h2>새 티켓</h2>
     <form id="tform" class="tform scroll">
@@ -387,7 +387,7 @@ function renderStatus() {
 
 function renderCats() {
   $('#cats').innerHTML = statusRows.map(r => `<label>${repoTag(r.name)}<select data-repo="${esc(r.name)}" aria-label="${esc(r.name)} 분류">${
-    ['', 'FE', 'BE', 'Module'].map(v => `<option value="${v}" ${(cats[r.name] || '') === v ? 'selected' : ''}>${v || '미분류'}</option>`).join('')
+    ['', 'FE', 'BE', 'Module', 'Toy'].map(v => `<option value="${v}" ${(cats[r.name] || '') === v ? 'selected' : ''}>${v || '미분류'}</option>`).join('')
   }</select></label>`).join('')
 }
 $('#cats').onchange = async e => {
@@ -499,7 +499,7 @@ async function loadCulprits(el) {
 // Tag-style repo radio list grouped by category, with a search box. Keeps the current selection across re-renders.
 function renderPicker(box, search, rows) {
   const keep = box.querySelector('input:checked')?.value
-  box.innerHTML = [['FE', 'FE'], ['BE', 'BE'], ['Module', 'Module'], ['', '미분류']].map(([cat, label]) => {
+  box.innerHTML = [['FE', 'FE'], ['BE', 'BE'], ['Module', 'Module'], ['Toy', 'Toy'], ['', '미분류']].map(([cat, label]) => {
     const rs = rows.filter(r => (cats[r.name] || '') === cat)
     return rs.length ? `<div class="pg"><h4>${label}</h4>` + rs.map(r => `<label class="pick" data-name="${esc(r.name.toLowerCase())}"><input type="radio" name="repo" value="${esc(r.name)}" required ${r.name === keep ? 'checked' : ''}>${repoTag(r.name)}</label>`).join('') + '</div>' : ''
   }).join('')

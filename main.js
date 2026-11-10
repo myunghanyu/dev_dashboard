@@ -10,13 +10,13 @@ ipcMain.handle('history', async (_, since, until) => {
   const [commits, sessions] = await Promise.all([c.commits(since, until), c.sessions(since, until)])
   return { commits: c.linkTickets(c.linkSessions(commits, sessions), readTickets().tickets), sessions }
 })
-// repo -> 'FE' | 'BE' | 'Module'
+// repo -> 'FE' | 'BE' | 'Module' | 'Toy'
 const CATS = () => path.join(app.getPath('userData'), 'categories.json')
 const readCats = () => { try { return JSON.parse(fs.readFileSync(CATS(), 'utf8')) } catch { return {} } }
 ipcMain.handle('categories', readCats)
 ipcMain.handle('setCategory', (_, repo, cat) => {
   const cats = readCats()
-  if (['FE', 'BE', 'Module'].includes(cat)) cats[repo] = cat; else delete cats[repo]
+  if (['FE', 'BE', 'Module', 'Toy'].includes(cat)) cats[repo] = cat; else delete cats[repo]
   fs.writeFileSync(CATS(), JSON.stringify(cats, null, 2))
   return cats
 })
