@@ -118,7 +118,7 @@ function updateTray() {
 function createWindow() {
   const win = new BrowserWindow({
     width: 1400, height: 900, backgroundColor: '#1a1a19', title: 'Dev Dashboard', icon: path.join(__dirname, 'icon.png'),
-    webPreferences: { preload: path.join(__dirname, 'preload.js') },
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), zoomFactor: 1.15 }, // ponytail: global zoom instead of re-sizing every px font
   })
   win.loadFile(path.join(__dirname, 'index.html'))
   win.webContents.setWindowOpenHandler(({ url }) => { // run links -> default browser

@@ -22,7 +22,8 @@
   button { background: var(--surface-1); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; cursor: pointer; font: inherit }
   button:hover { border-color: var(--text-muted) }
   button[aria-pressed=true] { background: var(--series-1); border-color: var(--series-1) }
-  #range { min-width: 200px; text-align: center; color: var(--text-secondary) }
+  #range { color: var(--text-secondary) }
+  #range input { background: var(--surface-1); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; font: inherit }
   .spacer { flex: 1 }
   .seg { display: inline-flex; text-transform: none; letter-spacing: 0 }
   .seg button { padding: 1px 8px; font-size: 11px; border-radius: 0 }
@@ -130,7 +131,7 @@
 <header>
   <h1>Dev Dashboard</h1>
   <button data-p="day">일</button><button data-p="week">주</button><button data-p="month">월</button>
-  <button id="prev" aria-label="이전">‹</button><span id="range"></span><button id="next" aria-label="다음">›</button>
+  <button id="prev" aria-label="이전">‹</button><span id="range"><input type="date" id="from" aria-label="시작일"> ~ <input type="date" id="to" aria-label="종료일"></span><button id="next" aria-label="다음">›</button>
   <span class="spacer"></span>
   <div id="usage" class="usage" aria-label="Claude 플랜 남은 사용량"></div>
   <button id="export">Export</button>
@@ -223,13 +224,19 @@ const repoTag = (name, cls = '') => {
   const c = cats[name]
   return `<span class="repo ${cls}" style="--c:var(--cat-${c || 'none'})" title="${esc(name)}"><span class="rn">${esc(name)}</span>${c ? `<b>${c}</b>` : ''}</span>`
 }
-let period = 'week', offset = 0, data = { commits: [], sessions: [] }, statusRows = []
+let period = 'week', offset = 0, custom = null, data = { commits: [], sessions: [] }, statusRows = []
 
+const hours = () => Array.from({ length: 24 }, (_, h) => ({ key: h, label: `${h}시` }))
 function range() {
   const now = new Date(); let s, e, buckets, label
   if (period === 'day') {
     s = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset); e = new Date(s); e.setDate(e.getDate() + 1)
-    buckets = Array.from({ length: 24 }, (_, h) => ({ key: h, label: `${h}시` })); label = fmtD(s)
+    buckets = hours(); label = fmtD(s)
+  } else if (period === 'custom') { // picked dates; ‹ › shift by the span length
+    const f = new Date(custom.from + 'T00:00'), n = Math.round((new Date(custom.to + 'T00:00') - f) / 864e5) + 1
+    s = new Date(f.getFullYear(), f.getMonth(), f.getDate() + offset * n); e = new Date(s.getFullYear(), s.getMonth(), s.getDate() + n)
+    buckets = n === 1 ? hours() : Array.from({ length: n }, (_, i) => { const d = new Date(s.getFullYear(), s.getMonth(), s.getDate() + i); return { key: fmtD(d), label: `${d.getMonth() + 1}/${d.getDate()}` } })
+    label = n === 1 ? fmtD(s) : `${fmtD(s)} ~ ${fmtD(new Date(e - 1))}`
   } else if (period === 'week') {
     const dow = (now.getDay() + 6) % 7
     s = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dow + offset * 7); e = new Date(s); e.setDate(e.getDate() + 7)
@@ -246,7 +253,7 @@ function range() {
 
 async function loadHistory() {
   const r = range()
-  $('#range').textContent = r.label
+  $('#from').value = fmtD(r.s); $('#to').value = fmtD(new Date(r.e - 1))
   document.querySelectorAll('[data-p]').forEach(b => b.setAttribute('aria-pressed', b.dataset.p === period))
   data = await api.history(r.s.toISOString(), r.e.toISOString())
   render(r)
@@ -265,11 +272,11 @@ function render(r) {
   // chart: stacked bars, Claude (series-1) at baseline, solo (series-2) on top
   const counts = r.buckets.map(b => ({ ...b, claude: 0, solo: 0 }))
   for (const c of commits) {
-    const d = new Date(c.date), k = period === 'day' ? d.getHours() : fmtD(d)
+    const d = new Date(c.date), k = typeof r.buckets[0].key === 'number' ? d.getHours() : fmtD(d)
     const b = counts.find(b => b.key === k); if (b) b[c.withClaude ? 'claude' : 'solo']++
   }
   const W = $('#chart').clientWidth || 800, H = $('#chart').clientHeight || 200, top = 10, bot = 22, L = 24, R = 14, max = Math.max(1, ...counts.map(b => b.claude + b.solo))
-  const bw = (W - L - R) / counts.length, barW = Math.max(4, Math.min(36, bw - 4)), y = v => (H - bot - top) * v / max
+  const bw = (W - L - R) / counts.length, barW = Math.max(1, Math.min(36, bw - 4)), y = v => (H - bot - top) * v / max
   const step = Math.ceil(counts.length / 16)
   let svg = `<line x1="${L}" x2="${W - R}" y1="${H - bot}" y2="${H - bot}" stroke="var(--border)"/>`
   svg += `<line x1="${L}" x2="${W - R}" y1="${top}" y2="${top}" stroke="var(--border)" stroke-dasharray="2 4"/><text x="${L - 6}" y="${top + 4}" text-anchor="end">${max}</text>`
@@ -417,6 +424,12 @@ function renderActions() {
 }
 
 document.querySelectorAll('[data-p]').forEach(b => b.onclick = () => { period = b.dataset.p; offset = 0; loadHistory() })
+$('#from').onchange = $('#to').onchange = () => { // typing a date switches to a custom range
+  let f = $('#from').value, t = $('#to').value
+  if (!f || !t) return
+  if (f > t) [f, t] = [t, f]
+  period = 'custom'; custom = { from: f, to: t }; offset = 0; loadHistory()
+}
 $('#prev').onclick = () => { offset--; loadHistory() }
 $('#next').onclick = () => { offset++; loadHistory() }
 $('#refresh').onclick = () => { loadHistory(); loadStatus() }
