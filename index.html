@@ -464,9 +464,24 @@ function renderTickets() {
         <div class="meta">${esc(t.branch)} ← ${esc(t.base)}</div>
         <div class="meta">커밋 ${s.commits || 0} · +${s.ins || 0}/−${s.del || 0}${s.last ? ` · ${ago(s.last)}` : ''}${s.gone ? ' · 브랜치 없음' : ''}</div>
         ${onBranch && st !== 'done' ? '<div class="warn">● 체크아웃됨</div>' : ''}
+        ${t.type === 'fix' && (st === 'pushed' || st === 'done') && s.commits ? `<div class="culprits" data-cid="${esc(t.id)}"></div>` : ''}
         <div class="acts">${acts}</div></div>`
     }).join('') || '<div class="muted" style="font-size:12px">없음</div>'}</div></div>`
   }).join('')
+  document.querySelectorAll('#board .culprits').forEach(loadCulprits)
+}
+// Fix tickets: earlier commits that last changed the lines the fix touched. Cached per ticket + commit count.
+const culpritCache = {}
+async function loadCulprits(el) {
+  const t = tickets.find(t => t.id === el.dataset.cid), id = `${t.id}:${t.stats.commits}`
+  el.innerHTML = '<div class="meta">관련 변경 이력 불러오는 중…</div>'
+  if (!(id in culpritCache)) culpritCache[id] = await api.ticket('culprits', { id: t.id }).catch(() => null)
+  const cs = culpritCache[id], slug = statusRows.find(r => r.name === t.repo)?.slug
+  const link = c => slug ? `<a href="https://github.com/${esc(slug)}/commit/${c.hash}" target="_blank">${c.hash.slice(0, 7)}</a>` : c.hash.slice(0, 7)
+  el.innerHTML = '<div class="meta" style="margin-top:6px;color:var(--text-secondary)">관련 변경 이력</div>' + (
+    cs == null ? '<div class="meta">불러오지 못함</div>'
+    : !cs.length ? '<div class="meta">없음</div>'
+    : cs.map(c => `<div class="meta">${link(c)} ${esc(c.subject)} · ${esc(c.author)} · ${ago(c.date)}${c.ticket ? ` · ${esc(c.ticket)}` : ''}${c.withClaude ? ' · Claude' : ''} · ${c.explicit ? '<b>Fixes 지정</b>' : `${c.lines}줄`}</div>`).join(''))
 }
 // Tag-style repo radio list grouped by category, with a search box. Keeps the current selection across re-renders.
 function renderPicker(box, search, rows) {

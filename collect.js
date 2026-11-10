@@ -19,7 +19,7 @@ let reposCache
 async function repos() {
   if (reposCache) return reposCache
   const found = []
-  for (const a of fs.readdirSync(DEV, { withFileTypes: true })) {
+  for (const a of fs.existsSync(DEV) ? fs.readdirSync(DEV, { withFileTypes: true }) : []) {
     if (!a.isDirectory()) continue
     const p = path.join(DEV, a.name)
     if (fs.existsSync(path.join(p, '.git'))) { found.push(p); continue }
@@ -88,7 +88,7 @@ async function sessions(since, until) {
   if (!fs.existsSync(CLAUDE_PROJECTS)) return []
   const list = await repos()
   const t0 = Date.parse(since), t1 = Date.parse(until)
-  const files = fs.readdirSync(CLAUDE_PROJECTS).flatMap(d => {
+  const files = (fs.existsSync(CLAUDE_PROJECTS) ? fs.readdirSync(CLAUDE_PROJECTS) : []).flatMap(d => {
     const dir = path.join(CLAUDE_PROJECTS, d)
     try { return fs.readdirSync(dir).filter(f => f.endsWith('.jsonl')).map(f => path.join(dir, f)) } catch { return [] }
   }).filter(f => fs.statSync(f).mtimeMs >= t0)
@@ -325,6 +325,45 @@ function linkTickets(commits, tickets) {
   return commits
 }
 
+// ---- root cause of a fix: blame the lines the fix changed (SZZ) ----
+// "git show -U0" -> old-side ranges the fix touched. Pure additions (count 0) blame the line above.
+function parseHunks(diff) {
+  const out = []; let file = null
+  for (const l of diff.split('\n')) {
+    if (l.startsWith('--- ')) file = l === '--- /dev/null' ? null : l.slice(6) // "--- a/path"
+    const m = file && l.match(/^@@ -(\d+)(?:,(\d+))? \+/)
+    if (!m) continue
+    const start = +m[1], count = m[2] == null ? 1 : +m[2]
+    if (count) out.push({ file, start, count })
+    else if (start > 0) out.push({ file, start, count: 1 })
+  }
+  return out
+}
+// Candidate commits that introduced what a fix ticket changed, most-blamed first.
+// "Fixes: <sha>" in a fix commit message is taken as given.
+// ponytail: SZZ heuristic; reformat/rename commits can show up as false culprits
+const ticketCulprits = async (t, tickets) => culprits(await repoPath(t.repo), `${t.startSha}..refs/heads/${t.branch}`, t.repo, tickets)
+async function culprits(p, range, repo, tickets) {
+  const fixes = (await run('git', ['rev-list', '--no-merges', range], p)).split('\n').filter(Boolean)
+  const own = new Set(fixes), lines = new Map(), explicit = new Set()
+  for (const sha of fixes) {
+    const msg = await run('git', ['show', '-s', '--format=%B', sha], p)
+    for (const m of msg.matchAll(/^Fixes:\s*([0-9a-f]{7,40})/gim)) {
+      const full = (await run('git', ['rev-parse', '--verify', '--quiet', m[1] + '^{commit}'], p).catch(() => '')).trim()
+      if (full) explicit.add(full)
+    }
+    for (const h of parseHunks(await run('git', ['show', '-U0', '--no-color', '--format=', sha], p))) {
+      const out = await run('git', ['blame', '-w', '--porcelain', '-L', `${h.start},+${h.count}`, `${sha}^`, '--', h.file], p).catch(() => '')
+      for (const m of out.matchAll(/^([0-9a-f]{40}) \d+ \d+/gm)) if (!own.has(m[1])) lines.set(m[1], (lines.get(m[1]) || 0) + 1)
+    }
+  }
+  const hashes = [...explicit, ...[...lines.keys()].filter(h => !explicit.has(h)).sort((a, b) => lines.get(b) - lines.get(a))].slice(0, 5)
+  if (!hashes.length) return []
+  const cs = linkTickets(parseLog(await run('git', ['log', '--no-walk=unsorted', '--shortstat', LOGFMT.replace('%S%x1f', '%an%x1f'), ...hashes], p)).map(c => ({ ...c, author: c.ref, ref: '', repo })), tickets)
+  return cs.map(c => ({ hash: c.hash, subject: c.subject, date: c.date, author: c.author, withClaude: c.withClaude,
+    ticket: c.ticket && c.ticket.id, lines: lines.get(c.hash) || 0, explicit: explicit.has(c.hash) }))
+}
+
 // ---- release PR: develop/dev -> main/master, everyone's commits ----
 const RELEASE_GROUPS = [['feat', '✨ Features'], ['fix', '🐛 Fixes'], ['refactor', '♻️ Refactor'], ['other', '🧹 Chore / 기타']]
 function releaseType(c) {
@@ -387,7 +426,7 @@ async function createReleasePR({ repo, base, head, title, body }) {
   return (await run('gh', ['pr', 'create', '-R', slug, '--base', base, '--head', head, '--title', title, '--body', body])).trim()
 }
 
-module.exports = { localUsage, usageView, releaseDraft, createReleasePR, USAGE_FILE, readUsage, TICKET_STATUS, branchName, createTicketBranch, checkoutTicket, ticketChanges, commitTicket, pushTicket, ticketStats, linkTickets, linkSessions, repos, commits, sessions, status, actions, exportLines, summarize }
+module.exports = { culprits, ticketCulprits, parseHunks, localUsage, usageView, releaseDraft, createReleasePR, USAGE_FILE, readUsage, TICKET_STATUS, branchName, createTicketBranch, checkoutTicket, ticketChanges, commitTicket, pushTicket, ticketStats, linkTickets, linkSessions, repos, commits, sessions, status, actions, exportLines, summarize }
 
 if (require.main === module) (async () => {
   const assert = require('assert')
@@ -395,6 +434,24 @@ if (require.main === module) (async () => {
   assert.equal(classify('fix(api): null deref'), 'fix')
   assert.equal(classify('[ssm] 시험용 ssm.ini 기능 추가'), 'feat')
   assert.equal(classify('[ui] 버그 수정'), 'fix')
+  assert.deepEqual(parseHunks('--- a/x.js\n+++ b/x.js\n@@ -3,2 +3,2 @@\n@@ -10 +10 @@\n@@ -20,0 +21,4 @@\n@@ -0,0 +1 @@\n--- /dev/null\n+++ b/new.js\n@@ -0,0 +1,9 @@\n'),
+    [{ file: 'x.js', start: 3, count: 2 }, { file: 'x.js', start: 10, count: 1 }, { file: 'x.js', start: 20, count: 1 }])
+  { // culprits: the fix edits a line from "bad", so "bad" is blamed, not "other" or the fix itself
+    const g = fs.mkdtempSync(path.join(os.tmpdir(), 'dd-szz-'))
+    const git = (...a) => run('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], g)
+    const commit = async (file, text, msg) => { fs.writeFileSync(path.join(g, file), text); await git('add', '-A'); await git('commit', '-qm', msg); return (await git('rev-parse', 'HEAD')).trim() }
+    await git('init', '-q')
+    await commit('a.js', 'one\ntwo\nthree\n', 'init')
+    const bad = await commit('a.js', 'one\nTWO_BUG\nthree\n', 'feat: T-7 two')
+    const other = await commit('b.js', 'x\n', 'chore: other')
+    await commit('a.js', 'one\nTWO\nthree\n', 'fix: two')
+    let cs = await culprits(g, `${other}..HEAD`, 'r', [{ id: 'T-7', repo: 'r', type: 'feat' }])
+    assert.deepEqual(cs.map(c => [c.hash, c.lines, c.explicit, c.ticket, c.author]), [[bad, 1, false, 'T-7', 't']])
+    await commit('b.js', 'y\n', `fix: b\n\nFixes: ${other.slice(0, 8)}`)
+    cs = await culprits(g, `${other}..HEAD`, 'r', [])
+    assert.deepEqual(cs.map(c => [c.hash, c.explicit]), [[other, true], [bad, false]])
+    fs.rmSync(g, { recursive: true })
+  }
   assert.equal(featureOf('[mbe] x', ''), 'mbe')
   assert.equal(featureOf('feat(auth): x', ''), 'auth')
   assert.equal(featureOf('wip', 'refs/heads/feat/mbe'), 'feat/mbe')

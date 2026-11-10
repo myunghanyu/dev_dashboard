@@ -1,0 +1,20 @@
+# Push a tag like v0.2.0 -> builds the macOS (Apple Silicon) app and attaches it to a GitHub Release.
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  mac:
+    runs-on: macos-latest # arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: ./release.sh build
+      - run: ditto -c -k --keepParent "dist/Dev Dashboard-darwin-arm64/Dev Dashboard.app" Dev-Dashboard-mac-arm64.zip
+      - run: gh release create "$GITHUB_REF_NAME" Dev-Dashboard-mac-arm64.zip --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

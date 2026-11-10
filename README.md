@@ -7,7 +7,7 @@
 | 탭 | 내용 |
 |---|---|
 | 개요 | 현재 작업 중인 레포, 최근 작업한 레포, 커밋 추이, 레포별 작업량 비율과 커밋 수 |
-| 티켓 | 티켓마다 브랜치를 만들고(체크아웃하지 않음) 앱에서 바로 커밋·푸시·완료 처리 |
+| 티켓 | 티켓마다 브랜치를 만들고(체크아웃하지 않음) 앱에서 바로 커밋·푸시·완료 처리. 푸시했거나 완료한 fix 티켓에는 관련 변경 이력 표시: 고친 줄을 `git blame`해서 그 줄을 이전에 바꾼 커밋을 찾음. 커밋 메시지에 `Fixes: <sha>`를 적으면 그 커밋을 맨 위에 표시 |
 | 릴리즈 PR | `develop`(없으면 `dev`) → `main`(없으면 `master`)으로 갈 모든 작성자의 커밋을 모아 PR 본문 초안 생성. 복사, AI로 다듬기, `gh pr create` 지원 |
 | 기능 이력 · 세션 | 커밋을 기능 단위로 묶은 이력과 Claude 세션 목록. Claude와 함께 만든 커밋 표시 |
 | 리포트 | 기간별 `[레포] - 기능: 요약` 텍스트 Export(클립보드·파일), Claude AI 요약 |
@@ -25,6 +25,16 @@ status line 연결 (`~/.claude/settings.json`):
 ```json
 { "statusLine": { "type": "command", "command": "~/develop/dev-dashboard/statusline.sh" } }
 ```
+
+## 설치 (빌드된 앱 받기)
+
+[최신 릴리즈](https://github.com/myunghanyu/dev_dashboard/releases/latest)에서 `Dev-Dashboard-mac-arm64.zip`(Apple Silicon용)을 받아 압축을 풀고 `/Applications`로 옮기세요. 앱이 Apple 인증서로 서명되어 있지 않아서, 처음 한 번은 아래 명령으로 macOS 격리 표시를 지워야 열립니다.
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/Dev Dashboard.app"
+```
+
+새 버전 배포: `package.json`의 `version`을 올리고 커밋한 뒤, `git tag v0.2.0 && git push origin v0.2.0`을 실행하세요. GitHub Actions가 앱을 빌드해서 릴리즈에 올립니다.
 
 ## 필요한 것
 

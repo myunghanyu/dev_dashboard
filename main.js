@@ -48,6 +48,8 @@ ipcMain.handle('ticket', async (_, action, arg = {}) => {
       break
     case 'changes':
       return c.ticketChanges(t.repo)
+    case 'culprits':
+      return c.ticketCulprits(t, db.tickets)
     case 'commit':
       await c.commitTicket(t.repo, t.branch, arg.message || '')
       if (t.status === 'todo') t.status = 'doing'

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build Dev Dashboard.app and install it to /Applications. Usage: npm run release
+# Build Dev Dashboard.app and install it to /Applications. Usage: npm run release  (./release.sh build: build only)
 set -e
 cd "$(dirname "$0")"
 APP="Dev Dashboard"
@@ -19,6 +19,7 @@ npx electron-packager . "$APP" --platform=darwin --arch="$(uname -m)" --icon=ico
   --app-bundle-id=ai.avikus.dev-dashboard --out=dist --overwrite \
   --ignore='^/dist' --ignore='^/release\.sh' --ignore='\.svg$' --ignore='\.icns$'
 codesign --force --deep -s - "dist/$APP-darwin-$(uname -m)/$APP.app" # ad-hoc sign, required on Apple Silicon
+[ "$1" = build ] && exit 0 # CI: build only, no install
 
 osascript -e "quit app \"$APP\"" 2>/dev/null || true
 sleep 1
