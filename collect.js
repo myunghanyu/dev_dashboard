@@ -435,7 +435,7 @@ async function createReleasePR({ repo, base, head, title, body }) {
   return (await run('gh', ['pr', 'create', '-R', slug, '--base', base, '--head', head, '--title', title, '--body', body])).trim()
 }
 
-module.exports = { openClaude, shq, culprits, ticketCulprits, parseHunks, localUsage, usageView, releaseDraft, createReleasePR, USAGE_FILE, readUsage, TICKET_STATUS, branchName, createTicketBranch, checkoutTicket, ticketChanges, commitTicket, pushTicket, ticketStats, linkTickets, linkSessions, repos, commits, sessions, status, actions, exportLines, summarize }
+module.exports = { repoPath, openClaude, shq, culprits, ticketCulprits, parseHunks, localUsage, usageView, releaseDraft, createReleasePR, USAGE_FILE, readUsage, TICKET_STATUS, branchName, createTicketBranch, checkoutTicket, ticketChanges, commitTicket, pushTicket, ticketStats, linkTickets, linkSessions, repos, commits, sessions, status, actions, exportLines, summarize }
 
 if (require.main === module) (async () => {
   const assert = require('assert')

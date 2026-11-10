@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('api', {
   categories: () => ipcRenderer.invoke('categories'),
   setCategory: (repo, cat) => ipcRenderer.invoke('setCategory', repo, cat),
   ticket: (action, arg) => ipcRenderer.invoke('ticket', action, arg),
+  onClaude: cb => ipcRenderer.on('claude', (_, id, item) => cb(id, item)),
   release: repo => ipcRenderer.invoke('release', repo),
   releaseCreate: arg => ipcRenderer.invoke('releaseCreate', arg),
   usage: () => ipcRenderer.invoke('usage'),

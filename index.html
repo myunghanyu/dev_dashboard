@@ -63,6 +63,7 @@
   ul { list-style: none; margin: 0; padding: 0 }
   li { padding: 4px 0; border-bottom: 1px solid var(--border); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
   li:last-child { border: 0 }
+  .stg { font-size: 11px; font-weight: 600 } .stg.s1 { color: var(--text-muted) } .stg.s2 { color: #ffb020 } .stg.s3 { color: #ff7a3c }
   .tag { display: inline-block; padding: 0 6px; border-radius: 4px; font-size: 11px; border: 1px solid var(--border); color: var(--text-secondary); margin-right: 4px }
   .repo { display: inline-flex; align-items: center; gap: 6px; padding: 1px 8px 1px 6px; border-radius: 999px; background: var(--surface-0); border: 1px solid var(--border); border-left: 4px solid var(--c, var(--cat-none)); font-weight: 600; font-size: 12px; color: var(--text-primary); margin-right: 6px; vertical-align: 1px; max-width: 100%; min-width: 0 }
   .repo .rn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0 }
@@ -105,6 +106,10 @@
   dialog::backdrop { background: rgb(0 0 0 / .5) }
   #commitDlg pre { max-height: 240px; overflow: auto; background: var(--surface-0); padding: 8px; border-radius: 6px; font: 12px ui-monospace, monospace }
   #commitDlg input { width: 100% }
+  #chLog { background: var(--surface-0); border-radius: 6px; padding: 8px 12px; margin-bottom: 8px; height: 55vh; overflow: auto; font-size: 13px; line-height: 1.6 }
+  #chLog > div { white-space: pre-wrap; margin: 4px 0 } #chLog .tool { font: 12px ui-monospace, monospace; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+  #chLog .me { font-weight: 600; border-top: 1px solid var(--border); padding-top: 6px } #chLog .me:first-child { border: 0; padding: 0 }
+  #chSay { width: 100%; box-sizing: border-box; background: var(--surface-0); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font: inherit; resize: vertical }
   .catfilter { display: flex; gap: 12px; margin-bottom: 10px; color: var(--text-secondary); font-size: 12px }
   details { border-bottom: 1px solid var(--border); padding: 6px 0 }
   summary { cursor: pointer }
@@ -207,6 +212,12 @@
   <label class="muted" style="font-size:12px">메시지<input id="cdMsg"></label>
   <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button value="cancel">취소</button><button value="ok" class="primary">커밋</button></div>
 </form></dialog>
+<dialog id="chatDlg" style="width:760px">
+  <h3 style="margin-top:0">Claude <span id="chTitle" class="muted"></span> <span id="chState" class="muted"></span></h3>
+  <div id="chLog"></div>
+  <textarea id="chSay" rows="2" placeholder="이어서 말하기 (⌘Enter)"></textarea>
+  <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px"><button data-ch="stop" hidden>중지</button><button data-ch="close">닫기</button><button data-ch="say" class="primary">보내기</button></div>
+</dialog>
 <div id="tip"></div>
 <script>
 const $ = s => document.querySelector(s)
@@ -224,6 +235,10 @@ const repoTag = (name, cls = '') => {
   const c = cats[name]
   return `<span class="repo ${cls}" style="--c:var(--cat-${c || 'none'})" title="${esc(name)}"><span class="rn">${esc(name)}</span>${c ? `<b>${c}</b>` : ''}</span>`
 }
+// workload stage per repo from avg commits/day over the period (same 1·2·3 idea as ryuwork)
+const STAGE_AT = [1, 4] // ponytail: fixed thresholds, tune here if 🔥 comes too easily/rarely
+const stageOf = perDay => perDay >= STAGE_AT[1] ? 3 : perDay >= STAGE_AT[0] ? 2 : 1
+const STAGE = ['1 쉬는 중', '2 가랑비', '3 🔥 Fire']
 let period = 'week', offset = 0, custom = null, data = { commits: [], sessions: [] }, statusRows = []
 
 const hours = () => Array.from({ length: 24 }, (_, h) => ({ key: h, label: `${h}시` }))
@@ -302,8 +317,9 @@ function render(r) {
   const byRepo = {}
   for (const c of commits) byRepo[c.repo] = (byRepo[c.repo] || 0) + 1
   renderShare(commits)
+  const days = Math.max(1, Math.round((r.e - r.s) / 864e5))
   $('#byrepo').innerHTML = Object.entries(byRepo).sort((a, b) => b[1] - a[1])
-    .map(([r, n]) => `<li>${repoTag(r)}<b>${n}</b> <span class="muted">커밋</span></li>`).join('') || '<li class="muted">커밋 없음</li>'
+    .map(([name, n]) => { const s = stageOf(n / days); return `<li>${repoTag(name)}<b>${n}</b> <span class="muted">커밋</span> <span class="stg s${s}" title="하루 평균 ${(n / days).toFixed(1)}커밋">${STAGE[s - 1]}</span></li>` }).join('') || '<li class="muted">커밋 없음</li>'
 
   // feature grouping: repo -> feature -> commits
   const groups = {}
@@ -467,8 +483,10 @@ function renderTickets() {
       const onBranch = cur === t.branch, s = t.stats || {}
       const b = (act, txt, cls = '') => `<button data-act="${act}" data-id="${esc(t.id)}" class="${cls}">${txt}</button>`
       const acts = st === 'done' ? b('reopen', '다시 열기') : [
-        !onBranch && b('start', '작업 시작', st === 'todo' ? 'primary' : ''),
-        onBranch && st === 'doing' && b('claude', 'Claude 열기'),
+        st === 'todo' && b('ask', 'Claude에게 시키기', 'primary'),
+        !onBranch && b('start', '작업 시작'),
+        t.sid && st !== 'todo' && b('chat', t.running ? '● Claude 작업 중' : 'Claude 대화', t.running ? 'primary' : ''),
+        onBranch && st === 'doing' && b('claude', '터미널'),
         onBranch && b('commit', '커밋', st === 'doing' ? 'primary' : ''),
         s.commits > 0 && b('push', '푸시'),
         st !== 'todo' && b('done', '완료', st === 'pushed' ? 'primary' : ''),
@@ -483,6 +501,42 @@ function renderTickets() {
     }).join('') || '<div class="muted" style="font-size:12px">없음</div>'}</div></div>`
   }).join('')
   document.querySelectorAll('#board .culprits').forEach(loadCulprits)
+}
+// In-app Claude chat per ticket (main.js runClaude): transcript streams in, follow-ups resume the ticket's session
+let chatId = null
+const chatItem = x => x.t === 'tool' ? `<div class="tool">🔧 ${esc(x.s)}</div>` : x.t === 'me' ? `<div class="me">› ${esc(x.s)}</div>`
+  : x.t === 'end' ? `<div class="muted">✓ 끝남 — 결과를 확인하고 커밋하거나 아래에 이어서 말하세요</div>`
+  : x.t === 'err' ? `<div class="warn">⚠ ${esc(x.s)}</div>` : `<div>${esc(x.s)}</div>`
+function chatBusy(busy) {
+  $('#chState').textContent = busy ? '· 작업 중…' : ''
+  $('#chatDlg [data-ch=stop]').hidden = !busy; $('#chatDlg [data-ch=say]').disabled = busy
+}
+async function openChat(id) {
+  const t = tickets.find(t => t.id === id), r = await api.ticket('run', { id }).catch(() => null)
+  chatId = id; $('#chTitle').textContent = `${id} · ${t?.title || ''}`
+  $('#chLog').innerHTML = r ? r.items.map(chatItem).join('') : '<div class="muted">이 티켓의 지난 Claude 세션에 이어서 말할 수 있습니다.</div>'
+  chatBusy(!!r?.busy)
+  if (!$('#chatDlg').open) $('#chatDlg').showModal()
+  $('#chLog').scrollTop = 1e9
+}
+api.onClaude((id, x) => {
+  if (x.t === 'end' || x.t === 'err') loadTickets()
+  if (!$('#chatDlg').open || id !== chatId) return
+  const c = $('#chLog'), atEnd = c.scrollHeight - c.scrollTop - c.clientHeight < 40
+  c.insertAdjacentHTML('beforeend', chatItem(x))
+  if (atEnd) c.scrollTop = 1e9
+  chatBusy(x.t !== 'end' && x.t !== 'err')
+})
+async function chatSay() {
+  const text = $('#chSay').value.trim(); if (!text) return
+  await tcall('say', { id: chatId, text }).then(() => { $('#chSay').value = '' }).catch(() => {})
+}
+$('#chSay').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); chatSay() } })
+$('#chatDlg').onclick = e => {
+  const act = e.target.dataset.ch
+  if (act === 'close') { $('#chatDlg').close(); loadTickets() }
+  else if (act === 'say') chatSay()
+  else if (act === 'stop') api.ticket('stop', { id: chatId })
 }
 // Fix tickets: earlier commits that last changed the lines the fix touched. Cached per ticket + commit count.
 const culpritCache = {}
@@ -545,6 +599,8 @@ $('#board').onclick = async e => {
       await loadStatus()
     }
     else if (act === 'claude') await tcall('claude', { id })
+    else if (act === 'ask') { await tcall('ask', { id }); await loadStatus(); openChat(id) }
+    else if (act === 'chat') openChat(id)
     else if (act === 'push') { if (confirm(`${t.branch} 를 origin 에 푸시할까요?`)) await tcall('push', { id }) }
     else if (act === 'done') await tcall('status', { id, status: 'done' })
     else if (act === 'reopen') await tcall('status', { id, status: 'doing' })

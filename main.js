@@ -1,6 +1,8 @@
 const { app, BrowserWindow, ipcMain, clipboard, dialog, shell, Tray, Menu, nativeImage } = require('electron')
 const fs = require('fs')
 const path = require('path')
+const { spawn } = require('child_process')
+const { randomUUID } = require('crypto')
 const c = require('./collect')
 
 // same store for `npm start` and the installed app; --user-data-dir overrides (tests)
@@ -24,13 +26,49 @@ ipcMain.handle('setCategory', (_, repo, cat) => {
 const TICKETS = () => path.join(app.getPath('userData'), 'tickets.json')
 const readTickets = () => { try { return JSON.parse(fs.readFileSync(TICKETS(), 'utf8')) } catch { return { seq: 0, tickets: [] } } }
 const saveTickets = db => fs.writeFileSync(TICKETS(), JSON.stringify(db, null, 2))
+
+// Claude inside the app (no Terminal): `claude -p` streams JSON into the ticket's chat; follow-ups resume t.sid.
+// runs[ticketId] = { busy, items: [{ t: 'me'|'text'|'tool'|'end'|'err', s }], proc } — in memory; after a restart the chat resumes t.sid.
+const runs = {}
+const emit = (id, item) => BrowserWindow.getAllWindows().forEach(w => w.webContents.send('claude', id, item))
+const brief = i => i.command || i.file_path || i.pattern || i.description || i.url || JSON.stringify(i).slice(0, 120)
+async function runClaude(t, fresh, text) {
+  const r = runs[t.id] ||= { items: [] }
+  if (r.busy) throw new Error('Claude가 아직 작업 중입니다. 끝나거나 중지한 뒤 보내세요.')
+  // ponytail: permission mode 'auto' (risky actions get denied, Claude says so) — the app can't answer prompts
+  const proc = spawn('claude', ['-p', fresh ? '--session-id' : '--resume', t.sid, '--output-format', 'stream-json', '--verbose',
+    '--permission-mode', 'auto', '--max-turns', '30'], { cwd: await c.repoPath(t.repo) })
+  Object.assign(r, { busy: true, proc })
+  const add = item => { r.items.push(item); emit(t.id, item) }
+  add({ t: 'me', s: fresh ? `${t.id} 작업 시작` : text })
+  proc.stdin.end(fresh ? `[${t.id}] ${t.title}\n\n${t.desc}\n\n지금 체크아웃된 브랜치 ${t.branch} 에서 작업하세요. 커밋은 하지 마세요(앱에서 커밋합니다).` : text)
+  let buf = '', err = '', ended = false
+  proc.stdout.on('data', d => {
+    const lines = (buf + d).split('\n'); buf = lines.pop()
+    for (const l of lines) {
+      let ev; try { ev = JSON.parse(l) } catch { continue }
+      if (ev.type === 'assistant') for (const x of ev.message?.content || []) {
+        if (x.type === 'text' && x.text.trim()) add({ t: 'text', s: x.text })
+        if (x.type === 'tool_use') add({ t: 'tool', s: `${x.name} · ${brief(x.input || {})}` })
+      }
+      if (ev.type === 'result') { ended = true; add(ev.subtype === 'error_max_turns' ? { t: 'err', s: '턴 상한(30)에 도달해 멈췄습니다. 이어서 말하면 계속합니다.' } : ev.is_error ? { t: 'err', s: ev.result || '오류로 끝났습니다.' } : { t: 'end', s: '' }) }
+    }
+  })
+  proc.stderr.on('data', d => { err = (err + d).slice(-2000) })
+  proc.on('error', e => { err = e.message })
+  proc.on('close', code => {
+    r.busy = false; r.proc = null
+    if (!ended) add({ t: 'err', s: code === null ? '중지했습니다.' : err.trim() || `종료 코드 ${code}` })
+  })
+  return true
+}
 ipcMain.handle('ticket', async (_, action, arg = {}) => {
   const db = readTickets()
   const t = db.tickets.find(t => t.id === arg.id)
   if (action !== 'list' && action !== 'create' && !t) throw new Error(`티켓 없음: ${arg.id}`)
   switch (action) {
     case 'list':
-      return Promise.all(db.tickets.map(async t => ({ ...t, stats: await c.ticketStats(t) })))
+      return Promise.all(db.tickets.map(async t => ({ ...t, stats: await c.ticketStats(t), running: !!runs[t.id]?.busy })))
     case 'create': {
       if (!arg.repo || !arg.title?.trim()) throw new Error('레포와 제목은 필수입니다.')
       const nt = { id: `T-${db.seq + 1}`, repo: arg.repo, type: ['feat', 'fix', 'chore', 'refactor'].includes(arg.type) ? arg.type : 'chore',
@@ -48,6 +86,20 @@ ipcMain.handle('ticket', async (_, action, arg = {}) => {
       break
     case 'claude':
       return c.openClaude(t.repo)
+    case 'ask': { // checkout + 진행 중 + start Claude in the app
+      if (runs[t.id]?.busy) throw new Error('Claude가 아직 작업 중입니다.')
+      await c.checkoutTicket(t.repo, t.branch)
+      const fresh = !t.sid
+      t.sid ||= randomUUID(); t.status = 'doing'; saveTickets(db)
+      return runClaude(t, fresh, '이어서 작업해 주세요.')
+    }
+    case 'say':
+      if (!t.sid) throw new Error("이 티켓의 Claude 세션이 없습니다. 먼저 'Claude에게 시키기'를 누르세요.")
+      return runClaude(t, false, arg.text || '')
+    case 'run':
+      return runs[t.id] ? { busy: runs[t.id].busy, items: runs[t.id].items } : null
+    case 'stop':
+      runs[t.id]?.proc?.kill(); return true
     case 'changes':
       return c.ticketChanges(t.repo)
     case 'culprits':
