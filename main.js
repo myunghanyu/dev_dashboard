@@ -22,9 +22,11 @@ ipcMain.handle('setCategory', (_, repo, cat) => {
   fs.writeFileSync(CATS(), JSON.stringify(cats, null, 2))
   return cats
 })
-// tickets: { seq, tickets: [{ id, repo, type, title, desc, branch, base, startSha, status, createdAt }] }
+// tickets: { seq, tickets: [{ id, repo, type, title, desc, note, images, branch, base, startSha, status, createdAt }] }
 const TICKETS = () => path.join(app.getPath('userData'), 'tickets.json')
 const readTickets = () => { try { return JSON.parse(fs.readFileSync(TICKETS(), 'utf8')) } catch { return { seq: 0, tickets: [] } } }
+const IMGDIR = id => path.join(app.getPath('userData'), 'ticket-images', id)
+const IMG_EXT = ['png', 'jpg', 'gif', 'webp']
 const saveTickets = db => fs.writeFileSync(TICKETS(), JSON.stringify(db, null, 2))
 
 // Claude inside the app (no Terminal): `claude -p` streams JSON into the ticket's chat; follow-ups resume t.sid.
@@ -41,7 +43,7 @@ async function runClaude(t, fresh, text) {
   Object.assign(r, { busy: true, proc })
   const add = item => { r.items.push(item); emit(t.id, item) }
   add({ t: 'me', s: fresh ? `${t.id} 작업 시작` : text })
-  proc.stdin.end(fresh ? `[${t.id}] ${t.title}\n\n${t.desc}\n\n지금 체크아웃된 브랜치 ${t.branch} 에서 작업하세요. 커밋은 하지 마세요(앱에서 커밋합니다).` : text)
+  proc.stdin.end(fresh ? `[${t.id}] ${t.title}\n\n${t.desc}${t.note ? `\n\n메모:\n${t.note}` : ''}${t.images?.length ? `\n\n첨부 이미지 (Read 도구로 확인하세요):\n${t.images.map(n => path.join(IMGDIR(t.id), n)).join('\n')}` : ''}\n\n지금 체크아웃된 브랜치 ${t.branch} 에서 작업하세요. 커밋은 하지 마세요(앱에서 커밋합니다).` : text)
   let buf = '', err = '', ended = false
   proc.stdout.on('data', d => {
     const lines = (buf + d).split('\n'); buf = lines.pop()
@@ -116,8 +118,29 @@ ipcMain.handle('ticket', async (_, action, arg = {}) => {
       if (!c.TICKET_STATUS[arg.status]) throw new Error(`잘못된 상태: ${arg.status}`)
       t.status = arg.status
       break
+    case 'edit':
+      if (!arg.title?.trim()) throw new Error('제목은 필수입니다.')
+      t.title = arg.title.trim(); t.desc = String(arg.desc || '').trim(); t.note = String(arg.note || '').trim()
+      break
+    case 'images': // data URLs: CSP blocks file:// images
+      return (t.images || []).map(n => ({ name: n, url: `data:image/${path.extname(n).slice(1).replace('jpg', 'jpeg')};base64,` + fs.readFileSync(path.join(IMGDIR(t.id), n)).toString('base64') }))
+    case 'addImage': {
+      const ext = (arg.type || '').split('/')[1]?.replace('jpeg', 'jpg')
+      if (!IMG_EXT.includes(ext)) throw new Error('png/jpg/gif/webp 이미지만 첨부할 수 있습니다.')
+      const n = `${Date.now()}-${randomUUID().slice(0, 8)}.${ext}`
+      fs.mkdirSync(IMGDIR(t.id), { recursive: true })
+      fs.writeFileSync(path.join(IMGDIR(t.id), n), Buffer.from(arg.data, 'base64'))
+      ;(t.images ||= []).push(n)
+      break
+    }
+    case 'delImage':
+      if (!t.images?.includes(arg.name)) throw new Error('이미지 없음')
+      fs.rmSync(path.join(IMGDIR(t.id), arg.name), { force: true })
+      t.images = t.images.filter(n => n !== arg.name)
+      break
     case 'delete': // keeps the git branch; only forgets the ticket
       db.tickets = db.tickets.filter(x => x !== t)
+      fs.rmSync(IMGDIR(t.id), { recursive: true, force: true })
       break
     default: throw new Error(`unknown action ${action}`)
   }

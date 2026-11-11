@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
 <title>Dev Dashboard</title>
 <style>
   :root {
@@ -105,6 +105,16 @@
   #current .info > div { padding: 5px 0; border-bottom: 1px solid var(--border); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
   #current .info > div:last-child { border-bottom: 0 }
   #current .info .k { display: inline-block; width: 80px; color: var(--text-muted); font-size: 12px }
+  .card { cursor: pointer }
+  #ticketDlg input, #ticketDlg textarea { min-height: 0; resize: vertical; background: var(--surface-0); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font: inherit }
+  #ticketDlg input, #ticketDlg textarea { width: 100%; box-sizing: border-box }
+  #ticketDlg label { display: block; margin-top: 10px }
+  #tdImgs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px }
+  #tdImgs figure { position: relative; margin: 0 }
+  #tdImgs img { height: 96px; max-width: 200px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); cursor: zoom-in }
+  #tdImgs img.big { height: auto; max-width: 100%; cursor: zoom-out }
+  #tdImgs figure:has(.big) { flex-basis: 100% }
+  #tdImgs button { position: absolute; top: 2px; right: 2px; padding: 0 6px; font-size: 12px }
   .card .t { font-weight: 600; margin: 4px 0 }
   .card .meta { font-size: 11px; color: var(--text-muted); word-break: break-all }
   .card .acts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px }
@@ -226,6 +236,16 @@
   <textarea id="chSay" rows="2" placeholder="이어서 말하기 (⌘Enter)"></textarea>
   <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px"><button data-ch="stop" hidden>중지</button><button data-ch="close">닫기</button><button data-ch="say" class="primary">보내기</button></div>
 </dialog>
+<dialog id="ticketDlg" style="width:720px"><form method="dialog">
+  <h3 style="margin-top:0" id="tdHead"></h3>
+  <div class="muted" style="font-size:12px" id="tdMeta"></div>
+  <label class="muted" style="font-size:12px">제목<input id="tdTitle" required></label>
+  <label class="muted" style="font-size:12px">설명<textarea id="tdDesc" rows="4" placeholder="해야 할 일, 완료 조건"></textarea></label>
+  <label class="muted" style="font-size:12px">메모 <span>(Claude에게 시킬 때 함께 전달됩니다)</span><textarea id="tdNote" rows="8" placeholder="자세한 메모, 참고 링크, 진행 상황…"></textarea></label>
+  <div class="muted" style="font-size:12px;margin-top:10px">이미지 <span>(⌘V 붙여넣기 · 드래그 · 파일 선택 — 바로 저장됩니다)</span> <input id="tdFile" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple style="width:auto;min-height:0"></div>
+  <div id="tdImgs"></div>
+  <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button value="cancel">닫기</button><button value="ok" class="primary">저장</button></div>
+</form></dialog>
 <div id="tip"></div>
 <script>
 const $ = s => document.querySelector(s)
@@ -508,9 +528,9 @@ function renderTickets() {
         s.commits > 0 && b('push', '푸시'),
         st !== 'todo' && b('done', '완료', st === 'pushed' ? 'primary' : ''),
       ].filter(Boolean).join('') + b('delete', '삭제')
-      return `<div class="card" title="${esc(t.desc)}"><div><span class="tag">${esc(t.id)}</span><span class="tag">${TTYPE[t.type]}</span>${repoTag(t.repo)}</div>
+      return `<div class="card" data-open="${esc(t.id)}" title="클릭해서 열기"><div><span class="tag">${esc(t.id)}</span><span class="tag">${TTYPE[t.type]}</span>${repoTag(t.repo)}</div>
         <div class="t">${esc(t.title)}</div>
-        <div class="meta">${esc(t.branch)} ← ${esc(t.base)}</div>
+        <div class="meta">${esc(t.branch)} ← ${esc(t.base)}${t.note ? ' · 📝 메모' : ''}${t.images?.length ? ` · 🖼 ${t.images.length}` : ''}</div>
         <div class="meta">커밋 ${s.commits || 0} · +${s.ins || 0}/−${s.del || 0}${s.last ? ` · ${ago(s.last)}` : ''}${s.gone ? ' · 브랜치 없음' : ''}</div>
         ${onBranch && st !== 'done' ? '<div class="warn">● 체크아웃됨</div>' : ''}
         ${t.type === 'fix' && (st === 'pushed' || st === 'done') && s.commits ? `<div class="culprits" data-cid="${esc(t.id)}"></div>` : ''}
@@ -638,7 +658,46 @@ $('#tform').onsubmit = async e => {
   const btn = e.target.querySelector('button[type=submit]'); btn.disabled = true
   try { await tcall('create', f); e.target.title.value = ''; e.target.desc.value = ''; e.target.branch.value = f.type + '/'; await loadTickets() } finally { btn.disabled = false }
 }
+// Ticket detail: edit title/desc/note (saved on 저장); images are saved immediately
+let openId = null
+async function openTicket(id) {
+  const t = tickets.find(t => t.id === id); if (!t) return
+  openId = id
+  $('#tdHead').textContent = t.id
+  $('#tdMeta').textContent = `${t.repo} · ${TTYPE[t.type]} · ${TSTATUS[t.status]} · ${t.branch} ← ${t.base}`
+  $('#tdTitle').value = t.title; $('#tdDesc').value = t.desc || ''; $('#tdNote').value = t.note || ''
+  $('#ticketDlg').returnValue = ''
+  $('#ticketDlg').showModal()
+  renderImgs()
+  await new Promise(r => $('#ticketDlg').addEventListener('close', r, { once: true }))
+  openId = null
+  if ($('#ticketDlg').returnValue === 'ok') await tcall('edit', { id, title: $('#tdTitle').value, desc: $('#tdDesc').value, note: $('#tdNote').value }).catch(() => {})
+  loadTickets()
+}
+async function renderImgs() {
+  const imgs = await api.ticket('images', { id: openId }).catch(() => [])
+  $('#tdImgs').innerHTML = imgs.map(i => `<figure><img src="${i.url}" alt="${esc(i.name)}"><button type="button" data-del="${esc(i.name)}" title="삭제">×</button></figure>`).join('')
+}
+async function addImgs(files) {
+  for (const f of files) {
+    if (!f.type.startsWith('image/')) continue
+    const data = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result.split(',')[1]); fr.readAsDataURL(f) })
+    await tcall('addImage', { id: openId, type: f.type, data }).catch(() => {})
+  }
+  renderImgs()
+}
+$('#tdFile').onchange = e => { addImgs([...e.target.files]); e.target.value = '' }
+$('#ticketDlg').addEventListener('paste', e => { const fs = [...e.clipboardData.files]; if (fs.some(f => f.type.startsWith('image/'))) { e.preventDefault(); addImgs(fs) } })
+$('#ticketDlg').addEventListener('dragover', e => e.preventDefault())
+$('#ticketDlg').addEventListener('drop', e => { e.preventDefault(); addImgs([...e.dataTransfer.files]) })
+$('#tdImgs').onclick = async e => {
+  const del = e.target.dataset.del
+  if (del) { if (confirm('이미지를 삭제할까요?')) { await tcall('delImage', { id: openId, name: del }).catch(() => {}); renderImgs() } }
+  else if (e.target.tagName === 'IMG') e.target.classList.toggle('big')
+}
 $('#board').onclick = async e => {
+  const card = e.target.closest('.card')
+  if (card && !e.target.closest('button, a')) return openTicket(card.dataset.open)
   const { act, id } = e.target.dataset; if (!act) return
   const t = tickets.find(t => t.id === id)
   e.target.disabled = true
