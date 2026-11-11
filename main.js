@@ -114,6 +114,14 @@ ipcMain.handle('ticket', async (_, action, arg = {}) => {
       await c.pushTicket(t.repo, t.branch)
       t.status = 'pushed'
       break
+    case 'prDraft':
+      return c.ticketPRDraft(t)
+    case 'pr': // base comes from ticketPRDraft (develop > dev > main > master)
+      if (!['develop', 'dev', 'main', 'master'].includes(arg.base)) throw new Error('develop · dev · main · master 로만 PR 을 올릴 수 있습니다.')
+      if (!arg.title?.trim()) throw new Error('제목은 필수입니다.')
+      t.pr = await c.createReleasePR({ repo: t.repo, base: arg.base, head: t.branch, title: arg.title.trim(), body: arg.body || '' })
+      saveTickets(db)
+      return t.pr
     case 'status':
       if (!c.TICKET_STATUS[arg.status]) throw new Error(`잘못된 상태: ${arg.status}`)
       t.status = arg.status

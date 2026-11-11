@@ -230,6 +230,12 @@
   <label class="muted" style="font-size:12px">메시지<input id="cdMsg"></label>
   <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button value="cancel">취소</button><button value="ok" class="primary">커밋</button></div>
 </form></dialog>
+<dialog id="prDlg" style="width:760px"><form method="dialog">
+  <h3 style="margin-top:0">PR 올리기 <span id="prInfo" class="muted"></span></h3>
+  <label class="muted" style="font-size:12px">제목<input id="prTitle" required></label>
+  <label class="muted" style="font-size:12px">본문 (마크다운 · 커밋 내용으로 채움, 자유롭게 고치세요)<textarea id="prBody" rows="16" style="font:12px/1.5 ui-monospace,monospace"></textarea></label>
+  <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button type="button" id="prAI" style="margin-right:auto">Claude로 다듬기</button><button value="cancel" formnovalidate>취소</button><button value="ok" class="primary">PR 올리기</button></div>
+</form></dialog>
 <dialog id="chatDlg" style="width:760px">
   <h3 style="margin-top:0">Claude <span id="chTitle" class="muted"></span> <span id="chState" class="muted"></span></h3>
   <div id="chLog"></div>
@@ -526,6 +532,7 @@ function renderTickets() {
         onBranch && st === 'doing' && b('claude', '터미널'),
         onBranch && b('commit', '커밋', st === 'doing' ? 'primary' : ''),
         s.commits > 0 && b('push', '푸시'),
+        st === 'pushed' && (t.pr ? `<a href="${esc(t.pr)}" target="_blank">PR #${esc(t.pr.split('/').pop())}</a>` : b('pr', 'PR 올리기')),
         st !== 'todo' && b('done', '완료', st === 'pushed' ? 'primary' : ''),
       ].filter(Boolean).join('') + b('delete', '삭제')
       return `<div class="card" data-open="${esc(t.id)}" title="클릭해서 열기"><div><span class="tag">${esc(t.id)}</span><span class="tag">${TTYPE[t.type]}</span>${repoTag(t.repo)}</div>
@@ -720,6 +727,24 @@ $('#board').onclick = async e => {
     else if (act === 'ask') { await tcall('ask', { id }); await loadStatus(); openChat(id) }
     else if (act === 'chat') openChat(id)
     else if (act === 'push') { if (confirm(`${t.branch} 를 origin 에 푸시할까요?`)) await tcall('push', { id }) }
+    else if (act === 'pr') {
+      const d = await tcall('prDraft', { id })
+      if (d.openPr) { open(d.openPr.url); return alert(`이미 열린 PR 이 있어요: #${d.openPr.number}`) }
+      if (!d.count) return alert(`${d.base} 에 없는 커밋이 없어요.`)
+      $('#prInfo').textContent = `· ${d.slug} · ${d.head} → ${d.base} · 커밋 ${d.count}`
+      $('#prTitle').value = d.title; $('#prBody').value = d.body
+      $('#prAI').onclick = async () => {
+        const btn = $('#prAI'); btn.disabled = true; btn.textContent = 'Claude 작성 중…'
+        try {
+          $('#prBody').value = await api.summarize(`다음은 ${t.repo} 레포 ${d.head} → ${d.base} PR 초안이다(티켓 ${t.id}). 리뷰어가 읽기 좋게 한국어로 다듬어줘.\n규칙: 맨 위에 1~3줄 요약, 그 아래 변경사항 목록(커밋 해시 유지), 리뷰 포인트/테스트 방법이 커밋에서 보이면 추가. 없는 내용은 지어내지 말 것. 마크다운 본문만 출력.\n\n${$('#prBody').value}`)
+        } catch (e) { alert('실패: ' + e.message) } finally { btn.disabled = false; btn.textContent = 'Claude로 다듬기' }
+      }
+      $('#prDlg').returnValue = ''
+      $('#prDlg').showModal()
+      await new Promise(r => $('#prDlg').addEventListener('close', r, { once: true }))
+      if ($('#prDlg').returnValue !== 'ok') return
+      open(await tcall('pr', { id, base: d.base, title: $('#prTitle').value, body: $('#prBody').value }))
+    }
     else if (act === 'done') await tcall('status', { id, status: 'done' })
     else if (act === 'reopen') await tcall('status', { id, status: 'doing' })
     else if (act === 'delete') { if (confirm(`${t.id} 티켓을 삭제할까요? (git 브랜치는 남겨둡니다)`)) await tcall('delete', { id }) }
