@@ -434,8 +434,30 @@ async function createReleasePR({ repo, base, head, title, body }) {
   if (![base, head].every(b => /^[\w./-]+$/.test(b) && !b.startsWith('-'))) throw new Error('잘못된 브랜치')
   return (await run('gh', ['pr', 'create', '-R', slug, '--base', base, '--head', head, '--title', title, '--body', body])).trim()
 }
+// Ticket PR: pushed ticket branch -> develop/dev, body drafted from the branch's commit messages
+async function ticketPRDraft(t) {
+  const p = await repoPath(t.repo), slug = (await repos()).find(r => r.name === t.repo)?.slug
+  if (!slug) throw new Error('GitHub 원격이 없는 레포입니다.')
+  await run('git', ['fetch', 'origin', '--prune', '--quiet'], p).catch(() => {})
+  let base
+  for (const n of ['develop', 'dev', 'main', 'master']) if (await refExists(p, `refs/remotes/origin/${n}`)) { base = n; break }
+  if (!base) throw new Error('origin 에 develop · dev · main · master 중 어느 브랜치도 없습니다.')
+  if (!await refExists(p, `refs/remotes/origin/${t.branch}`)) throw new Error(`origin 에 ${t.branch} 가 없습니다. 먼저 푸시하세요.`)
+  const range = `origin/${base}..origin/${t.branch}`
+  const [log, diffstat] = await Promise.all([
+    run('git', ['log', '--no-merges', '--reverse', '--format=%x1e%h%x1f%s%x1f%b', range], p),
+    run('git', ['diff', '--shortstat', `origin/${base}...origin/${t.branch}`], p),
+  ])
+  const cs = log.split('\x1e').slice(1).map(r => { const [hash, subject, body = ''] = r.split('\x1f'); return { hash, subject, body: body.trim() } })
+  const openPr = await run('gh', ['pr', 'list', '-R', slug, '--base', base, '--head', t.branch, '--state', 'open', '--json', 'number,url'])
+    .then(o => JSON.parse(o)[0] || null, () => null)
+  const body = [`## ${t.id} ${t.title}`, '', t.desc, '', '### 변경 사항',
+    ...cs.map(c => `- ${c.subject} (${c.hash})${c.body ? '\n' + c.body.split('\n').filter(Boolean).map(l => `  ${l}`).join('\n') : ''}`),
+    '', diffstat.trim() && `> ${diffstat.trim()}`].join('\n').replace(/\n{3,}/g, '\n\n').trim()
+  return { slug, base, head: t.branch, count: cs.length, openPr, title: `[${t.id}] ${t.title}`, body }
+}
 
-module.exports = { repoPath, openClaude, shq, culprits, ticketCulprits, parseHunks, localUsage, usageView, releaseDraft, createReleasePR, USAGE_FILE, readUsage, TICKET_STATUS, branchName, createTicketBranch, checkoutTicket, ticketChanges, commitTicket, pushTicket, ticketStats, linkTickets, linkSessions, repos, commits, sessions, status, actions, exportLines, summarize }
+module.exports = { repoPath, openClaude, shq, culprits, ticketCulprits, parseHunks, localUsage, usageView, releaseDraft, createReleasePR, ticketPRDraft, USAGE_FILE, readUsage, TICKET_STATUS, branchName, createTicketBranch, checkoutTicket, ticketChanges, commitTicket, pushTicket, ticketStats, linkTickets, linkSessions, repos, commits, sessions, status, actions, exportLines, summarize }
 
 if (require.main === module) (async () => {
   const assert = require('assert')
