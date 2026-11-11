@@ -96,7 +96,15 @@
   .board { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px }
   .col { display: flex; flex-direction: column; min-height: 0; background: var(--surface-0); border-radius: 6px; padding: 8px }
   .col h3 { margin: 0 0 8px; font-size: 12px; color: var(--text-secondary) }
-  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px }
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px}
+  #current .cur { display: flex; gap: 14px; align-items: stretch }
+  #current .rk { flex: none; width: 140px; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center }
+  #current .rk .repo { margin-right: 0 }
+  #current canvas.rocket { width: 140px; height: 120px; background: var(--surface-0); border-radius: 8px }
+  #current .info { flex: 1; min-width: 0; align-self: center }
+  #current .info > div { padding: 5px 0; border-bottom: 1px solid var(--border); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+  #current .info > div:last-child { border-bottom: 0 }
+  #current .info .k { display: inline-block; width: 80px; color: var(--text-muted); font-size: 12px }
   .card .t { font-weight: 600; margin: 4px 0 }
   .card .meta { font-size: 11px; color: var(--text-muted); word-break: break-all }
   .card .acts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px }
@@ -271,7 +279,7 @@ async function loadHistory() {
   $('#from').value = fmtD(r.s); $('#to').value = fmtD(new Date(r.e - 1))
   document.querySelectorAll('[data-p]').forEach(b => b.setAttribute('aria-pressed', b.dataset.p === period))
   data = await api.history(r.s.toISOString(), r.e.toISOString())
-  render(r)
+  render(r); if (statusRows.length) renderStatus() // rocket stage follows the period
 }
 
 function render(r) {
@@ -389,13 +397,22 @@ async function loadStatus() {
   loadActions()
 }
 
+// rocket in 현재 작업 중 (from ryuwork): stage = the repo's commits/day over the period, same 1·2·3 as 레포별 커밋
+const still = matchMedia('(prefers-reduced-motion: reduce)').matches
+const SAY = ['오늘은 잠시 숨 고르는 중', '가랑비에 옷 젖듯이, 차곡차곡 쌓는 중', 'Fire!!!! 🔥 제대로 불붙었어요']
 function renderStatus() {
-  const c = statusRows[0]
-  $('#current').innerHTML = c ? `<div style="margin-bottom:6px">${repoTag(c.name, 'big')}</div>
-    <div>브랜치 <b>${esc(c.branch || '-')}</b> · 미커밋 변경 <b>${c.dirty}</b>개</div>
-    <div class="muted">마지막 활동 ${ago(c.activity)}</div>
-    ${c.lastSubject ? `<div>최근 커밋: ${esc(c.lastSubject)} <span class="muted">(${ago(c.lastDate)})</span></div>` : ''}
-    ${c.session ? `<div>최근 Claude 세션: ${esc(c.session.title)} <span class="muted">(${ago(c.session.end)})</span></div>` : ''}` : '활동 없음'
+  const c = statusRows[0], r = range(), days = Math.max(1, Math.round((r.e - r.s) / 864e5))
+  const st = c && stageOf(data.commits.filter(x => x.repo === c.name).length / days)
+  const row = (k, v) => `<div><span class="k">${k}</span>${v}</div>`
+  $('#current').innerHTML = c ? `<div class="cur"><div class="rk">${repoTag(c.name, 'big')}<canvas class="rocket" width="140" height="120" data-stage="${st}" data-c="${getComputedStyle(document.body).getPropertyValue(`--cat-${cats[c.name] || 'none'}`).trim()}" role="img" aria-label="${SAY[st - 1]}"></canvas>
+    <div class="stg s${st}">${STAGE[st - 1]}<br>${SAY[st - 1]}</div></div><div class="info">
+    ${row('브랜치', `<b>${esc(c.branch || '-')}</b>`)}
+    ${row('미커밋 변경', `<b>${c.dirty}</b>개`)}
+    ${row('마지막 활동', ago(c.activity))}
+    ${c.lastSubject ? row('최근 커밋', `${esc(c.lastSubject)} <span class="muted">(${ago(c.lastDate)})</span>`) : ''}
+    ${c.session ? row('Claude 세션', `${esc(c.session.title)} <span class="muted">(${ago(c.session.end)})</span>`) : ''}
+  </div></div>` : '활동 없음'
+  animateRockets()
   $('#recent').innerHTML = statusRows.slice(0, 8).map(r => `<li>${repoTag(r.name)}<span class="tag">${esc(r.branch || '-')}</span>${r.dirty ? `<span class="tag">미커밋 ${r.dirty}</span>` : ''}<span class="muted"> ${ago(r.activity)}</span> — ${esc(r.lastSubject || r.session?.title || '')}</li>`).join('')
   renderCats()
   renderTickets() // checked-out branch drives the ticket buttons
@@ -501,6 +518,48 @@ function renderTickets() {
     }).join('') || '<div class="muted" style="font-size:12px">없음</div>'}</div></div>`
   }).join('')
   document.querySelectorAll('#board .culprits').forEach(loadCulprits)
+}
+function drawRocket(cv, t) {
+  const g = cv.getContext('2d'), W = cv.width, H = cv.height, s = +cv.dataset.stage, c = cv.dataset.c
+  g.clearRect(0, 0, W, H)
+  let y = H - 22, x = W / 2 // rocket base
+  if (s === 3) {
+    for (let i = 0; i < 14; i++) { // stars streaming down = speed
+      const sy = (i * 37 + t * 0.25) % H
+      g.fillStyle = 'rgba(255,255,255,.35)'; g.fillRect((i * 47 + i * i * 13) % W, sy, 1.5, 6)
+    }
+    y = H - 22 - ((t * 0.06) % (H + 70)) + 35; x += Math.sin(t / 90) * 2 // climbs out the top, re-enters at bottom
+  } else {
+    g.fillStyle = '#2e2e2c'; g.fillRect(8, H - 14, W - 16, 3) // launch pad
+    if (s === 2) x += Math.sin(t / 25) * 0.8 // rumble
+  }
+  if (s > 1) { // flame
+  const f = 1 + Math.sin(t / 40) * 0.15 + Math.random() * 0.12, L = (s === 3 ? 34 : 18) * f
+  const grd = g.createLinearGradient(0, y, 0, y + L)
+  grd.addColorStop(0, '#fff6c0'); grd.addColorStop(0.35, '#ffb020'); grd.addColorStop(1, 'rgba(255,60,0,0)')
+  g.fillStyle = grd; g.beginPath(); g.moveTo(x - 7, y); g.quadraticCurveTo(x, y + L * 1.2, x + 7, y); g.fill()
+  if (s === 3) for (let i = 0; i < 6; i++) { // smoke puffs
+    const k = ((t / 12 + i * 9) % 54) / 54
+    g.fillStyle = `rgba(160,160,160,${0.25 * (1 - k)})`; g.beginPath(); g.arc(x + Math.sin(i * 2.3) * 8 * k, y + L + k * 40, 3 + k * 7, 0, 7); g.fill()
+  }
+  }
+  const body = s === 1 ? '#6d6c66' : '#e9e7e1', trim = s === 1 ? '#4a4945' : c
+  g.fillStyle = trim // fins
+  g.beginPath(); g.moveTo(x - 9, y - 16); g.lineTo(x - 16, y); g.lineTo(x - 9, y); g.fill()
+  g.beginPath(); g.moveTo(x + 9, y - 16); g.lineTo(x + 16, y); g.lineTo(x + 9, y); g.fill()
+  g.fillStyle = body; g.beginPath(); g.moveTo(x - 9, y); g.lineTo(x - 9, y - 34); g.quadraticCurveTo(x, y - 62, x + 9, y - 34); g.lineTo(x + 9, y); g.fill() // hull
+  g.fillStyle = trim; g.beginPath(); g.moveTo(x - 7.5, y - 40); g.quadraticCurveTo(x, y - 62, x + 7.5, y - 40); g.fill() // nose
+  g.fillStyle = s === 1 ? '#3a3936' : '#7fd0ff'; g.beginPath(); g.arc(x, y - 26, 4, 0, 7); g.fill() // window
+}
+let rocketLoop = 0
+function animateRockets() {
+  cancelAnimationFrame(rocketLoop)
+  const tick = t => {
+    const cvs = document.querySelectorAll('#current canvas.rocket')
+    cvs.forEach(cv => drawRocket(cv, t))
+    if (cvs.length && !still) rocketLoop = requestAnimationFrame(tick) // stops when no repo is shown
+  }
+  rocketLoop = requestAnimationFrame(tick)
 }
 // In-app Claude chat per ticket (main.js runClaude): transcript streams in, follow-ups resume the ticket's session
 let chatId = null
