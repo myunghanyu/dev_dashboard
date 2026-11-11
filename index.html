@@ -106,6 +106,10 @@
   #current .info > div:last-child { border-bottom: 0 }
   #current .info .k { display: inline-block; width: 80px; color: var(--text-muted); font-size: 12px }
   .card { cursor: pointer }
+  .col.over { outline: 2px dashed var(--series-1); outline-offset: -2px }
+  .card.dragging { opacity: .4 }
+  .blink { animation: blink 1s ease-in-out infinite }
+  @keyframes blink { 50% { opacity: .35 } }
   #ticketDlg input, #ticketDlg textarea { min-height: 0; resize: vertical; background: var(--surface-0); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font: inherit }
   #ticketDlg input, #ticketDlg textarea { width: 100%; box-sizing: border-box }
   #ticketDlg label { display: block; margin-top: 10px }
@@ -521,21 +525,21 @@ function renderTickets() {
   renderPicker($('#repoPick'), $('#repoFilter'), statusRows)
   $('#board').innerHTML = Object.entries(TSTATUS).map(([st, label]) => {
     const list = tickets.filter(t => t.status === st)
-    return `<div class="col"><h3>${label} <span class="muted">${list.length}</span></h3><div class="scroll">${list.map(t => {
+    return `<div class="col" data-st="${st}"><h3>${label} <span class="muted">${list.length}</span></h3><div class="scroll">${list.map(t => {
       const cur = statusRows.find(r => r.name === t.repo)?.branch
       const onBranch = cur === t.branch, s = t.stats || {}
       const b = (act, txt, cls = '') => `<button data-act="${act}" data-id="${esc(t.id)}" class="${cls}">${txt}</button>`
       const acts = st === 'done' ? b('reopen', '다시 열기') : [
-        st === 'todo' && b('ask', 'Claude에게 시키기', 'primary'),
+        st === 'todo' && !t.running && b('ask', 'Claude에게 시키기', 'primary'),
         !onBranch && b('start', '작업 시작'),
-        t.sid && st !== 'todo' && b('chat', t.running ? '● Claude 작업 중' : 'Claude 대화', t.running ? 'primary' : ''),
+        t.sid && b('chat', t.running ? '● Claude 작업 중' : 'Claude 대화', t.running ? 'primary blink' : ''),
         onBranch && st === 'doing' && b('claude', '터미널'),
         onBranch && b('commit', '커밋', st === 'doing' ? 'primary' : ''),
         s.commits > 0 && b('push', '푸시'),
         st === 'pushed' && (t.pr ? `<a href="${esc(t.pr)}" target="_blank">PR #${esc(t.pr.split('/').pop())}</a>` : b('pr', 'PR 올리기')),
         st !== 'todo' && b('done', '완료', st === 'pushed' ? 'primary' : ''),
       ].filter(Boolean).join('') + b('delete', '삭제')
-      return `<div class="card" data-open="${esc(t.id)}" title="클릭해서 열기"><div><span class="tag">${esc(t.id)}</span><span class="tag">${TTYPE[t.type]}</span>${repoTag(t.repo)}</div>
+      return `<div class="card" draggable="true" data-open="${esc(t.id)}" title="클릭해서 열기 · 드래그해서 상태 변경"><div><span class="tag">${esc(t.id)}</span><span class="tag">${TTYPE[t.type]}</span>${repoTag(t.repo)}</div>
         <div class="t">${esc(t.title)}</div>
         <div class="meta">${esc(t.branch)} ← ${esc(t.base)}${t.note ? ' · 📝 메모' : ''}${t.images?.length ? ` · 🖼 ${t.images.length}` : ''}</div>
         <div class="meta">커밋 ${s.commits || 0} · +${s.ins || 0}/−${s.del || 0}${s.last ? ` · ${ago(s.last)}` : ''}${s.gone ? ' · 브랜치 없음' : ''}</div>
@@ -750,6 +754,19 @@ $('#board').onclick = async e => {
     else if (act === 'delete') { if (confirm(`${t.id} 티켓을 삭제할까요? (git 브랜치는 남겨둡니다)`)) await tcall('delete', { id }) }
     await loadTickets(); loadHistory()
   } catch {} finally { e.target.disabled = false }
+}
+
+// Drag a card onto another column to set any status
+let dragId = null
+$('#board').ondragstart = e => { const c = e.target.closest?.('.card'); if (!c) return; dragId = c.dataset.open; c.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move' }
+$('#board').ondragend = e => { dragId = null; e.target.classList?.remove('dragging'); document.querySelectorAll('#board .over').forEach(c => c.classList.remove('over')) }
+$('#board').ondragover = e => { const col = dragId && e.target.closest('.col'); if (!col) return; e.preventDefault(); document.querySelectorAll('#board .over').forEach(c => c !== col && c.classList.remove('over')); col.classList.add('over') }
+$('#board').ondrop = async e => {
+  const col = e.target.closest('.col'), id = dragId; if (!col || !id) return
+  e.preventDefault(); col.classList.remove('over')
+  if (tickets.find(t => t.id === id)?.status === col.dataset.st) return
+  try { await tcall('status', { id, status: col.dataset.st }) } catch {}
+  loadTickets()
 }
 
 async function loadUsage() { renderUsage(await api.usage()) }
