@@ -118,6 +118,7 @@
   #tdImgs img { height: 96px; max-width: 200px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); cursor: zoom-in }
   #tdImgs img.big { height: auto; max-width: 100%; cursor: zoom-out }
   #tdImgs figure:has(.big) { flex-basis: 100% }
+  #tdImgs .file { padding: 8px 28px 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; max-width: 240px; overflow-wrap: anywhere }
   #tdImgs button { position: absolute; top: 2px; right: 2px; padding: 0 6px; font-size: 12px }
   .card .t { font-weight: 600; margin: 4px 0 }
   .card .meta { font-size: 11px; color: var(--text-muted); word-break: break-all }
@@ -252,7 +253,7 @@
   <label class="muted" style="font-size:12px">제목<input id="tdTitle" required></label>
   <label class="muted" style="font-size:12px">설명<textarea id="tdDesc" rows="4" placeholder="해야 할 일, 완료 조건"></textarea></label>
   <label class="muted" style="font-size:12px">메모 <span>(Claude에게 시킬 때 함께 전달됩니다)</span><textarea id="tdNote" rows="8" placeholder="자세한 메모, 참고 링크, 진행 상황…"></textarea></label>
-  <div class="muted" style="font-size:12px;margin-top:10px">이미지 <span>(⌘V 붙여넣기 · 드래그 · 파일 선택 — 바로 저장됩니다)</span> <input id="tdFile" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple style="width:auto;min-height:0"></div>
+  <div class="muted" style="font-size:12px;margin-top:10px">첨부 파일 <span>(⌘V 붙여넣기 · 드래그 · 파일 선택 — 바로 저장됩니다)</span> <input id="tdFile" type="file" multiple style="width:auto;min-height:0"></div>
   <div id="tdImgs"></div>
   <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button value="cancel">닫기</button><button value="ok" class="primary">저장</button></div>
 </form></dialog>
@@ -541,7 +542,7 @@ function renderTickets() {
       ].filter(Boolean).join('') + b('delete', '삭제')
       return `<div class="card" draggable="true" data-open="${esc(t.id)}" title="클릭해서 열기 · 드래그해서 상태 변경"><div><span class="tag">${esc(t.id)}</span><span class="tag">${TTYPE[t.type]}</span>${repoTag(t.repo)}</div>
         <div class="t">${esc(t.title)}</div>
-        <div class="meta">${esc(t.branch)} ← ${esc(t.base)}${t.note ? ' · 📝 메모' : ''}${t.images?.length ? ` · 🖼 ${t.images.length}` : ''}</div>
+        <div class="meta">${esc(t.branch)} ← ${esc(t.base)}${t.note ? ' · 📝 메모' : ''}${t.images?.length ? ` · 📎 ${t.images.length}` : ''}</div>
         <div class="meta">커밋 ${s.commits || 0} · +${s.ins || 0}/−${s.del || 0}${s.last ? ` · ${ago(s.last)}` : ''}${s.gone ? ' · 브랜치 없음' : ''}</div>
         ${onBranch && st !== 'done' ? '<div class="warn">● 체크아웃됨</div>' : ''}
         ${t.type === 'fix' && (st === 'pushed' || st === 'done') && s.commits ? `<div class="culprits" data-cid="${esc(t.id)}"></div>` : ''}
@@ -669,7 +670,7 @@ $('#tform').onsubmit = async e => {
   const btn = e.target.querySelector('button[type=submit]'); btn.disabled = true
   try { await tcall('create', f); e.target.title.value = ''; e.target.desc.value = ''; e.target.branch.value = f.type + '/'; await loadTickets() } finally { btn.disabled = false }
 }
-// Ticket detail: edit title/desc/note (saved on 저장); images are saved immediately
+// Ticket detail: edit title/desc/note (saved on 저장); attachments are saved immediately
 let openId = null
 async function openTicket(id) {
   const t = tickets.find(t => t.id === id); if (!t) return
@@ -687,23 +688,22 @@ async function openTicket(id) {
 }
 async function renderImgs() {
   const imgs = await api.ticket('images', { id: openId }).catch(() => [])
-  $('#tdImgs').innerHTML = imgs.map(i => `<figure><img src="${i.url}" alt="${esc(i.name)}"><button type="button" data-del="${esc(i.name)}" title="삭제">×</button></figure>`).join('')
+  $('#tdImgs').innerHTML = imgs.map(i => `<figure>${i.url ? `<img src="${i.url}" alt="${esc(i.name)}">` : `<div class="file">📄 ${esc(i.name.replace(/^\d+-\w{8}-/, ''))}</div>`}<button type="button" data-del="${esc(i.name)}" title="삭제">×</button></figure>`).join('')
 }
 async function addImgs(files) {
   for (const f of files) {
-    if (!f.type.startsWith('image/')) continue
     const data = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result.split(',')[1]); fr.readAsDataURL(f) })
-    await tcall('addImage', { id: openId, type: f.type, data }).catch(() => {})
+    await tcall('addImage', { id: openId, name: f.name, data }).catch(() => {})
   }
   renderImgs()
 }
 $('#tdFile').onchange = e => { addImgs([...e.target.files]); e.target.value = '' }
-$('#ticketDlg').addEventListener('paste', e => { const fs = [...e.clipboardData.files]; if (fs.some(f => f.type.startsWith('image/'))) { e.preventDefault(); addImgs(fs) } })
+$('#ticketDlg').addEventListener('paste', e => { const fs = [...e.clipboardData.files]; if (fs.length) { e.preventDefault(); addImgs(fs) } })
 $('#ticketDlg').addEventListener('dragover', e => e.preventDefault())
 $('#ticketDlg').addEventListener('drop', e => { e.preventDefault(); addImgs([...e.dataTransfer.files]) })
 $('#tdImgs').onclick = async e => {
   const del = e.target.dataset.del
-  if (del) { if (confirm('이미지를 삭제할까요?')) { await tcall('delImage', { id: openId, name: del }).catch(() => {}); renderImgs() } }
+  if (del) { if (confirm('첨부 파일을 삭제할까요?')) { await tcall('delImage', { id: openId, name: del }).catch(() => {}); renderImgs() } }
   else if (e.target.tagName === 'IMG') e.target.classList.toggle('big')
 }
 $('#board').onclick = async e => {
