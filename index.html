@@ -227,7 +227,7 @@
     </div></section>
   <section data-tab="memo" class="c4"><h2>메모 <span id="memoCount" class="muted"></span></h2>
     <div class="tform" style="flex:1;min-height:0">
-      <div style="display:flex;gap:8px"><input id="memoQ" type="search" placeholder="검색 (공백으로 여러 단어)" aria-label="메모 검색" style="flex:1"><button id="memoNew" class="primary">새 메모</button></div>
+      <div style="display:flex;gap:8px"><input id="memoQ" type="search" placeholder="검색 (공백으로 여러 단어)" aria-label="메모 검색" style="flex:1"><button id="memoSync" title="Mac 메모 앱의 메모를 가져옵니다 (읽기 전용)">Mac 메모 동기화</button><button id="memoNew" class="primary">새 메모</button></div>
       <ul id="memoList" class="scroll"></ul>
     </div></section>
   <section data-tab="memo" class="c8"><h2>내용 <span id="memoInfo" class="muted"></span></h2>
@@ -853,7 +853,7 @@ $('#relCreate').onclick = async () => {
 // ---- memos: free-form notes, newest-edited first, autosaved to userData/memos.json ----
 let memos = [], memoId = null, memoT
 const memoCur = () => memos.find(m => m.id === memoId)
-async function loadMemos() { memos = await api.memos(); renderMemos() }
+async function loadMemos() { memos = await api.memos(); renderMemos(); if (memos.some(m => m.apple)) syncApple() } // auto-resync once opted in
 function hl(s, words) { // split raw text on the query words, escape each piece, wrap matches
   if (!words.length) return esc(s)
   const re = new RegExp(`(${words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi')
@@ -866,13 +866,26 @@ function renderMemos() {
   $('#memoList').innerHTML = list.map(m => {
     const [title, ...rest] = m.text.split('\n'), body = rest.join(' ').trim()
     const lw = words.find(w => body.toLowerCase().includes(w)), i = lw ? Math.max(0, body.toLowerCase().indexOf(lw) - 20) : 0
-    return `<li data-id="${m.id}" aria-selected="${m.id === memoId}"><div class="mt">${hl(title.trim() || '(제목 없음)', words)}</div><div class="ms">${ago(m.updatedAt)} · ${hl((i ? '…' : '') + body.slice(i, i + 120), words)}</div></li>`
+    return `<li data-id="${m.id}" aria-selected="${m.id === memoId}"><div class="mt">${hl(title.trim() || '(제목 없음)', words)}</div><div class="ms">${m.apple ? ` ${esc(m.apple)} · ` : ''}${ago(m.updatedAt)} · ${hl((i ? '…' : '') + body.slice(i, i + 120), words)}</div></li>`
   }).join('') || '<li class="muted">메모가 없어요</li>'
   const m = memoCur()
-  $('#memoText').disabled = $('#memoDel').disabled = !m
+  $('#memoText').disabled = !m; $('#memoDel').disabled = !m || !!m.apple
+  $('#memoText').readOnly = !!m?.apple
   if ($('#memoText').value !== (m?.text ?? '')) $('#memoText').value = m?.text ?? ''
-  $('#memoInfo').textContent = m ? `${new Date(m.createdAt).toLocaleString()} 작성` : ''
+  $('#memoInfo').textContent = m ? `${new Date(m.createdAt).toLocaleString()} 작성${m.apple ? ` · Mac 메모 ${m.apple} (읽기 전용)` : ''}` : ''
 }
+// replace all apple:* memos with a fresh snapshot from Notes; local memos untouched
+async function syncApple() {
+  const b = $('#memoSync'); b.disabled = true; b.textContent = '동기화 중…'
+  try {
+    const notes = await api.appleNotes()
+    memos = [...memos.filter(m => !m.apple), ...notes.map(n => ({ id: 'apple:' + n.id, apple: n.folder, text: n.text, createdAt: n.createdAt, updatedAt: n.updatedAt }))]
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    saveMemos(); renderMemos()
+  } catch (e) { alert(e.message.replace(/^Error invoking remote method '\w+': (Error: )?/, '')) }
+  finally { b.disabled = false; b.textContent = 'Mac 메모 동기화' }
+}
+$('#memoSync').onclick = syncApple
 const saveMemos = () => api.saveMemos(memos)
 $('#memoQ').oninput = renderMemos
 $('#memoList').onclick = e => { const li = e.target.closest('li[data-id]'); if (li) { memoId = li.dataset.id; renderMemos() } }

@@ -16,7 +16,7 @@ if [ ! -f icon.icns ] || [ icon.png -nt icon.icns ]; then
 fi
 
 npx electron-packager . "$APP" --platform=darwin --arch="$(uname -m)" --icon=icon.icns \
-  --app-bundle-id=ai.avikus.dev-dashboard --out=dist --overwrite \
+  --app-bundle-id=ai.avikus.dev-dashboard --usage-description.AppleEvents="메모 앱의 메모를 가져오기 위해 필요합니다." --out=dist --overwrite \
   --ignore='^/dist' --ignore='^/release\.sh' --ignore='\.svg$' --ignore='\.icns$'
 codesign --force --deep -s - "dist/$APP-darwin-$(uname -m)/$APP.app" # ad-hoc sign, required on Apple Silicon
 [ "$1" = build ] && exit 0 # CI: build only, no install
