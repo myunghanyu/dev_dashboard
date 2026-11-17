@@ -110,6 +110,11 @@
   .card.dragging { opacity: .4 }
   .blink { animation: blink 1s ease-in-out infinite }
   @keyframes blink { 50% { opacity: .35 } }
+  #memoList li { cursor: pointer; padding: 6px 8px; border-radius: 6px; white-space: normal }
+  #memoList li[aria-selected=true] { background: var(--surface-0) }
+  #memoList .mt { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+  #memoList .ms { font-size: 12px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+  #memoList mark { background: #ffb02055; color: inherit }
   #ticketDlg input, #ticketDlg textarea { min-height: 0; resize: vertical; background: var(--surface-0); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font: inherit }
   #ticketDlg input, #ticketDlg textarea { width: 100%; box-sizing: border-box }
   #ticketDlg label { display: block; margin-top: 10px }
@@ -168,6 +173,7 @@
 <nav id="tabs" role="tablist">
   <button role="tab" data-tab="overview">개요</button>
   <button role="tab" data-tab="tickets">티켓</button>
+  <button role="tab" data-tab="memo">메모</button>
   <button role="tab" data-tab="release">릴리즈 PR</button>
   <button role="tab" data-tab="history">기능 이력 · 세션</button>
   <button role="tab" data-tab="report">리포트</button>
@@ -218,6 +224,16 @@
       <label>제목<input id="relTitle"></label>
       <label style="flex:1;min-height:0">본문 (마크다운)<textarea id="relBody" style="flex:1;font:12px/1.5 ui-monospace,monospace;resize:none" placeholder="왼쪽에서 레포를 고르고 'PR 내용 만들기'를 누르세요."></textarea></label>
       <div style="display:flex;gap:8px;justify-content:flex-end"><button id="relCopy">복사</button><button id="relAI">AI로 다듬기</button><button id="relCreate" class="primary">GitHub PR 생성</button></div>
+    </div></section>
+  <section data-tab="memo" class="c4"><h2>메모 <span id="memoCount" class="muted"></span></h2>
+    <div class="tform" style="flex:1;min-height:0">
+      <div style="display:flex;gap:8px"><input id="memoQ" type="search" placeholder="검색 (공백으로 여러 단어)" aria-label="메모 검색" style="flex:1"><button id="memoNew" class="primary">새 메모</button></div>
+      <ul id="memoList" class="scroll"></ul>
+    </div></section>
+  <section data-tab="memo" class="c8"><h2>내용 <span id="memoInfo" class="muted"></span></h2>
+    <div class="tform" style="flex:1;min-height:0">
+      <textarea id="memoText" style="flex:1;resize:none;font:13px/1.6 ui-monospace,monospace" placeholder="첫 줄이 제목이 돼요. 입력하면 자동 저장됩니다."></textarea>
+      <div style="display:flex;justify-content:flex-end"><button id="memoDel">삭제</button></div>
     </div></section>
 </main>
 <dialog id="budgetDlg" style="width:420px"><form method="dialog" class="tform">
@@ -834,6 +850,48 @@ $('#relCreate').onclick = async () => {
   } catch (e) { alert(e.message.replace(/^Error invoking remote method '\w+': (Error: )?/, '')) }
 }
 
+// ---- memos: free-form notes, newest-edited first, autosaved to userData/memos.json ----
+let memos = [], memoId = null, memoT
+const memoCur = () => memos.find(m => m.id === memoId)
+async function loadMemos() { memos = await api.memos(); renderMemos() }
+function hl(s, words) { // split raw text on the query words, escape each piece, wrap matches
+  if (!words.length) return esc(s)
+  const re = new RegExp(`(${words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi')
+  return s.split(re).map((p, i) => i % 2 ? `<mark>${esc(p)}</mark>` : esc(p)).join('')
+}
+function renderMemos() {
+  const words = $('#memoQ').value.toLowerCase().split(/\s+/).filter(Boolean)
+  const list = memos.filter(m => words.every(w => m.text.toLowerCase().includes(w)))
+  $('#memoCount').textContent = words.length ? `${list.length} / ${memos.length}` : memos.length
+  $('#memoList').innerHTML = list.map(m => {
+    const [title, ...rest] = m.text.split('\n'), body = rest.join(' ').trim()
+    const lw = words.find(w => body.toLowerCase().includes(w)), i = lw ? Math.max(0, body.toLowerCase().indexOf(lw) - 20) : 0
+    return `<li data-id="${m.id}" aria-selected="${m.id === memoId}"><div class="mt">${hl(title.trim() || '(제목 없음)', words)}</div><div class="ms">${ago(m.updatedAt)} · ${hl((i ? '…' : '') + body.slice(i, i + 120), words)}</div></li>`
+  }).join('') || '<li class="muted">메모가 없어요</li>'
+  const m = memoCur()
+  $('#memoText').disabled = $('#memoDel').disabled = !m
+  if ($('#memoText').value !== (m?.text ?? '')) $('#memoText').value = m?.text ?? ''
+  $('#memoInfo').textContent = m ? `${new Date(m.createdAt).toLocaleString()} 작성` : ''
+}
+const saveMemos = () => api.saveMemos(memos)
+$('#memoQ').oninput = renderMemos
+$('#memoList').onclick = e => { const li = e.target.closest('li[data-id]'); if (li) { memoId = li.dataset.id; renderMemos() } }
+$('#memoNew').onclick = () => {
+  const now = new Date().toISOString()
+  memos.unshift({ id: Date.now().toString(36), text: '', createdAt: now, updatedAt: now })
+  memoId = memos[0].id; $('#memoQ').value = ''; renderMemos(); saveMemos(); $('#memoText').focus()
+}
+$('#memoText').oninput = () => {
+  const m = memoCur(); if (!m) return
+  m.text = $('#memoText').value; m.updatedAt = new Date().toISOString()
+  memos = [m, ...memos.filter(x => x !== m)]
+  clearTimeout(memoT); memoT = setTimeout(() => { saveMemos(); renderMemos() }, 400)
+}
+$('#memoDel').onclick = () => {
+  const m = memoCur(); if (!m || (m.text.trim() && !confirm('이 메모를 삭제할까요?'))) return
+  memos = memos.filter(x => x !== m); memoId = null; saveMemos(); renderMemos()
+}
+
 function showTab(t) {
   document.body.dataset.tab = t
   document.querySelectorAll('main section').forEach(s => s.hidden = s.dataset.tab !== t)
@@ -846,6 +904,8 @@ $('#tabs').onclick = e => e.target.dataset.tab && showTab(e.target.dataset.tab)
 let resizeT
 addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => document.body.dataset.tab === 'overview' && render(range()), 100) })
 showTab('overview')
+loadMemos()
+addEventListener('beforeunload', () => { clearTimeout(memoT); saveMemos() })
 api.categories().then(c => { cats = c; loadHistory(); loadStatus() })
 setInterval(loadActions, 60000)
 loadUsage(); setInterval(loadUsage, 30000)
