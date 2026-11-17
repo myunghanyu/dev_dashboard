@@ -1,7 +1,7 @@
 const { app, BrowserWindow, ipcMain, clipboard, dialog, shell, Tray, Menu, nativeImage } = require('electron')
 const fs = require('fs')
 const path = require('path')
-const { spawn } = require('child_process')
+const { spawn, execFile } = require('child_process')
 const { randomUUID } = require('crypto')
 const c = require('./collect')
 
@@ -26,6 +26,17 @@ ipcMain.handle('setCategory', (_, repo, cat) => {
 const MEMOS = () => path.join(app.getPath('userData'), 'memos.json')
 ipcMain.handle('memos', () => { try { return JSON.parse(fs.readFileSync(MEMOS(), 'utf8')) } catch { return [] } })
 ipcMain.handle('saveMemos', (_, list) => fs.writeFileSync(MEMOS(), JSON.stringify(list, null, 2)))
+// Apple Notes (read-only mirror) via JXA; first call triggers macOS Automation consent for Notes
+const NOTES_JXA = `const N = Application('Notes'), out = []
+for (const f of N.folders()) {
+  const name = f.name(); if (/Recently Deleted|최근 삭제/.test(name)) continue
+  const ns = f.notes, ids = ns.id(), tx = ns.plaintext(), cd = ns.creationDate(), md = ns.modificationDate()
+  ids.forEach((id, i) => out.push({ id, folder: name, text: tx[i], createdAt: cd[i], updatedAt: md[i] }))
+}
+JSON.stringify(out)`
+ipcMain.handle('appleNotes', () => new Promise((res, rej) =>
+  execFile('osascript', ['-l', 'JavaScript', '-e', NOTES_JXA], { maxBuffer: 256 << 20, timeout: 120000 }, (e, out, err) =>
+    e ? rej(new Error(/-1743|not allowed/i.test(err) ? '메모 앱 접근 권한이 없어요. 시스템 설정 › 개인정보 보호 및 보안 › 자동화에서 허용해 주세요.' : err || e.message)) : res(JSON.parse(out)))))
 
 // tickets: { seq, tickets: [{ id, repo, type, title, desc, note, images, branch, base, startSha, status, createdAt }] }
 const TICKETS = () => path.join(app.getPath('userData'), 'tickets.json')

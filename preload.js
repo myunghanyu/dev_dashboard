@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('api', {
   onClaude: cb => ipcRenderer.on('claude', (_, id, item) => cb(id, item)),
   memos: () => ipcRenderer.invoke('memos'),
   saveMemos: list => ipcRenderer.invoke('saveMemos', list),
+  appleNotes: () => ipcRenderer.invoke('appleNotes'),
   release: repo => ipcRenderer.invoke('release', repo),
   releaseCreate: arg => ipcRenderer.invoke('releaseCreate', arg),
   usage: () => ipcRenderer.invoke('usage'),
