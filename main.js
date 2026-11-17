@@ -22,6 +22,11 @@ ipcMain.handle('setCategory', (_, repo, cat) => {
   fs.writeFileSync(CATS(), JSON.stringify(cats, null, 2))
   return cats
 })
+// memos: [{ id, text, updatedAt }] — renderer sends the whole list on every save
+const MEMOS = () => path.join(app.getPath('userData'), 'memos.json')
+ipcMain.handle('memos', () => { try { return JSON.parse(fs.readFileSync(MEMOS(), 'utf8')) } catch { return [] } })
+ipcMain.handle('saveMemos', (_, list) => fs.writeFileSync(MEMOS(), JSON.stringify(list, null, 2)))
+
 // tickets: { seq, tickets: [{ id, repo, type, title, desc, note, images, branch, base, startSha, status, createdAt }] }
 const TICKETS = () => path.join(app.getPath('userData'), 'tickets.json')
 const readTickets = () => { try { return JSON.parse(fs.readFileSync(TICKETS(), 'utf8')) } catch { return { seq: 0, tickets: [] } } }
