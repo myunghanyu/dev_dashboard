@@ -114,6 +114,25 @@ async function sessions(since, until) {
   return res.filter(Boolean).sort((a, b) => b.end.localeCompare(a.end))
 }
 
+// A ticket's Claude chat rebuilt from Claude's own session log, so history survives restarts and status changes.
+const brief = i => i.command || i.file_path || i.pattern || i.description || i.url || JSON.stringify(i).slice(0, 120)
+async function sessionTranscript(sid, root = CLAUDE_PROJECTS) {
+  const f = (fs.existsSync(root) ? fs.readdirSync(root) : []).map(d => path.join(root, d, sid + '.jsonl')).find(f => fs.existsSync(f))
+  const items = []
+  if (!f) return items
+  for await (const line of readline.createInterface({ input: fs.createReadStream(f) })) {
+    let j; try { j = JSON.parse(line) } catch { continue }
+    if (j.isMeta || j.isSidechain || !j.message) continue
+    const c = typeof j.message.content === 'string' ? [{ type: 'text', text: j.message.content }] : j.message.content || []
+    for (const x of c) {
+      if (j.type === 'user' && x.type === 'text' && x.text.trim() && !x.text.startsWith('<')) items.push({ t: 'me', s: x.text })
+      if (j.type === 'assistant' && x.type === 'text' && x.text.trim()) items.push({ t: 'text', s: x.text })
+      if (j.type === 'assistant' && x.type === 'tool_use') items.push({ t: 'tool', s: `${x.name} · ${brief(x.input || {})}` })
+    }
+  }
+  return items
+}
+
 // No Co-Authored-By trailer? A commit made during (or <1h after) a Claude session in the same repo counts too.
 function linkSessions(commits, sessions) {
   for (const c of commits) {
@@ -457,7 +476,7 @@ async function ticketPRDraft(t) {
   return { slug, base, head: t.branch, count: cs.length, openPr, title: `[${t.id}] ${t.title}`, body }
 }
 
-module.exports = { repoPath, openClaude, shq, culprits, ticketCulprits, parseHunks, localUsage, usageView, releaseDraft, createReleasePR, ticketPRDraft, USAGE_FILE, readUsage, TICKET_STATUS, branchName, createTicketBranch, checkoutTicket, ticketChanges, commitTicket, pushTicket, ticketStats, linkTickets, linkSessions, repos, commits, sessions, status, actions, exportLines, summarize }
+module.exports = { brief, sessionTranscript, repoPath, openClaude, shq, culprits, ticketCulprits, parseHunks, localUsage, usageView, releaseDraft, createReleasePR, ticketPRDraft, USAGE_FILE, readUsage, TICKET_STATUS, branchName, createTicketBranch, checkoutTicket, ticketChanges, commitTicket, pushTicket, ticketStats, linkTickets, linkSessions, repos, commits, sessions, status, actions, exportLines, summarize }
 
 if (require.main === module) (async () => {
   const assert = require('assert')
@@ -483,6 +502,17 @@ if (require.main === module) (async () => {
     cs = await culprits(g, `${other}..HEAD`, 'r', [])
     assert.deepEqual(cs.map(c => [c.hash, c.explicit]), [[other, true], [bad, false]])
     fs.rmSync(g, { recursive: true })
+  }
+  { // transcript: prompts, text, tools; tool results / meta / sidechain skipped
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dd-tr-')); fs.mkdirSync(path.join(root, 'p'))
+    fs.writeFileSync(path.join(root, 'p', 'S.jsonl'), [
+      { type: 'user', message: { content: 'do it' } }, { type: 'user', isMeta: true, message: { content: 'meta' } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'ok' }, { type: 'tool_use', name: 'Bash', input: { command: 'ls' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', content: 'x' }] } }, { type: 'assistant', isSidechain: true, message: { content: [{ type: 'text', text: 'sub' }] } },
+    ].map(JSON.stringify).join('\n'))
+    assert.deepEqual(await sessionTranscript('S', root), [{ t: 'me', s: 'do it' }, { t: 'text', s: 'ok' }, { t: 'tool', s: 'Bash · ls' }])
+    assert.deepEqual(await sessionTranscript('none', root), [])
+    fs.rmSync(root, { recursive: true })
   }
   assert.equal(featureOf('[mbe] x', ''), 'mbe')
   assert.equal(featureOf('feat(auth): x', ''), 'auth')

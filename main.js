@@ -30,17 +30,18 @@ const IMG_EXT = ['png', 'jpg', 'gif', 'webp']
 const saveTickets = db => fs.writeFileSync(TICKETS(), JSON.stringify(db, null, 2))
 
 // Claude inside the app (no Terminal): `claude -p` streams JSON into the ticket's chat; follow-ups resume t.sid.
-// runs[ticketId] = { busy, items: [{ t: 'me'|'text'|'tool'|'end'|'err', s }], proc } — in memory; after a restart the chat resumes t.sid.
+// runs[ticketId] = { busy, items: [{ t: 'me'|'text'|'tool'|'end'|'err', s }], proc } — items start from the session log, so the full chat shows.
 const runs = {}
 const emit = (id, item) => BrowserWindow.getAllWindows().forEach(w => w.webContents.send('claude', id, item))
-const brief = i => i.command || i.file_path || i.pattern || i.description || i.url || JSON.stringify(i).slice(0, 120)
+const { brief } = c
 async function runClaude(t, fresh, text) {
   const r = runs[t.id] ||= { items: [] }
+  const [cwd, items] = await Promise.all([c.repoPath(t.repo), fresh ? [] : c.sessionTranscript(t.sid)])
   if (r.busy) throw new Error('Claude가 아직 작업 중입니다. 끝나거나 중지한 뒤 보내세요.')
   // ponytail: permission mode 'auto' (risky actions get denied, Claude says so) — the app can't answer prompts
   const proc = spawn('claude', ['-p', fresh ? '--session-id' : '--resume', t.sid, '--output-format', 'stream-json', '--verbose',
-    '--permission-mode', 'auto', '--max-turns', '30'], { cwd: await c.repoPath(t.repo) })
-  Object.assign(r, { busy: true, proc })
+    '--permission-mode', 'auto', '--max-turns', '30'], { cwd })
+  Object.assign(r, { busy: true, proc, items })
   const add = item => { r.items.push(item); emit(t.id, item) }
   add({ t: 'me', s: fresh ? `${t.id} 작업 시작` : text })
   proc.stdin.end(fresh ? `[${t.id}] ${t.title}\n\n${t.desc}${t.note ? `\n\n메모:\n${t.note}` : ''}${t.images?.length ? `\n\n첨부 이미지 (Read 도구로 확인하세요):\n${t.images.map(n => path.join(IMGDIR(t.id), n)).join('\n')}` : ''}\n\n지금 체크아웃된 브랜치 ${t.branch} 에서 작업하세요. 커밋은 하지 마세요(앱에서 커밋합니다).` : text)
@@ -99,7 +100,7 @@ ipcMain.handle('ticket', async (_, action, arg = {}) => {
       if (!t.sid) throw new Error("이 티켓의 Claude 세션이 없습니다. 먼저 'Claude에게 시키기'를 누르세요.")
       return runClaude(t, false, arg.text || '')
     case 'run':
-      return runs[t.id] ? { busy: runs[t.id].busy, items: runs[t.id].items } : null
+      return runs[t.id]?.busy ? { busy: true, items: runs[t.id].items } : { busy: false, items: t.sid ? await c.sessionTranscript(t.sid) : [] }
     case 'stop':
       runs[t.id]?.proc?.kill(); return true
     case 'changes':

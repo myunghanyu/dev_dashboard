@@ -254,7 +254,7 @@
   <label class="muted" style="font-size:12px">메모 <span>(Claude에게 시킬 때 함께 전달됩니다)</span><textarea id="tdNote" rows="8" placeholder="자세한 메모, 참고 링크, 진행 상황…"></textarea></label>
   <div class="muted" style="font-size:12px;margin-top:10px">이미지 <span>(⌘V 붙여넣기 · 드래그 · 파일 선택 — 바로 저장됩니다)</span> <input id="tdFile" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple style="width:auto;min-height:0"></div>
   <div id="tdImgs"></div>
-  <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button value="cancel">닫기</button><button value="ok" class="primary">저장</button></div>
+  <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button type="button" id="tdChat" style="margin-right:auto"></button><button value="cancel">닫기</button><button value="ok" class="primary">저장</button></div>
 </form></dialog>
 <div id="tip"></div>
 <script>
@@ -529,10 +529,11 @@ function renderTickets() {
       const cur = statusRows.find(r => r.name === t.repo)?.branch
       const onBranch = cur === t.branch, s = t.stats || {}
       const b = (act, txt, cls = '') => `<button data-act="${act}" data-id="${esc(t.id)}" class="${cls}">${txt}</button>`
-      const acts = st === 'done' ? b('reopen', '다시 열기') : [
+      const chat = t.sid && b('chat', t.running ? '● Claude 작업 중' : 'Claude 대화', t.running ? 'primary blink' : '')
+      const acts = st === 'done' ? [chat, b('reopen', '다시 열기')].filter(Boolean).join('') : [
         st === 'todo' && !t.running && b('ask', 'Claude에게 시키기', 'primary'),
         !onBranch && b('start', '작업 시작'),
-        t.sid && b('chat', t.running ? '● Claude 작업 중' : 'Claude 대화', t.running ? 'primary blink' : ''),
+        chat,
         onBranch && st === 'doing' && b('claude', '터미널'),
         onBranch && b('commit', '커밋', st === 'doing' ? 'primary' : ''),
         s.commits > 0 && b('push', '푸시'),
@@ -604,7 +605,7 @@ function chatBusy(busy) {
 async function openChat(id) {
   const t = tickets.find(t => t.id === id), r = await api.ticket('run', { id }).catch(() => null)
   chatId = id; $('#chTitle').textContent = `${id} · ${t?.title || ''}`
-  $('#chLog').innerHTML = r ? r.items.map(chatItem).join('') : '<div class="muted">이 티켓의 지난 Claude 세션에 이어서 말할 수 있습니다.</div>'
+  $('#chLog').innerHTML = r?.items.length ? r.items.map(chatItem).join('') : '<div class="muted">대화 기록을 찾지 못했습니다. 이 티켓의 Claude 세션에 이어서 말할 수 있습니다.</div>'
   chatBusy(!!r?.busy)
   if (!$('#chatDlg').open) $('#chatDlg').showModal()
   $('#chLog').scrollTop = 1e9
@@ -677,6 +678,12 @@ async function openTicket(id) {
   $('#tdHead').textContent = t.id
   $('#tdMeta').textContent = `${t.repo} · ${TTYPE[t.type]} · ${TSTATUS[t.status]} · ${t.branch} ← ${t.base}`
   $('#tdTitle').value = t.title; $('#tdDesc').value = t.desc || ''; $('#tdNote').value = t.note || ''
+  // chat is reachable from any status; no session yet → start one
+  $('#tdChat').textContent = t.sid ? (t.running ? '● Claude 작업 중' : 'Claude 대화') : 'Claude에게 시키기'
+  $('#tdChat').onclick = async () => {
+    if (!t.sid) { try { await tcall('ask', { id }); await loadStatus() } catch { return } }
+    openChat(id)
+  }
   $('#ticketDlg').returnValue = ''
   $('#ticketDlg').showModal()
   renderImgs()
